@@ -10,6 +10,16 @@ release/
 
 .worktrees/
 
+# Secrets and credentials (never commit)
+.env
+.env.*
+*.key
+creds*.json
+hh_cookies.json
+.ssh/
+.aws/
+*.pem
+
 # Unrelated experiments in this folder
 Gemini.bat
 GeminiStudio.ps1
@@ -17,3 +27,16 @@ studio.html
 studio_server.py
 chats/
 vnc_*.png
+
+# OS and editor
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
