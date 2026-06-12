@@ -100,6 +100,10 @@
   "keywords": [],
   "author": "",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/frolofpavel/grok-desktop.git"
+  },
   "type": "commonjs",
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
