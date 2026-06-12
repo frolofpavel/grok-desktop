@@ -1,0 +1,19 @@
+node_modules/
+out/
+dist/
+release/
+.vite/
+.verstak-data/
+*.log
+.DS_Store
+.superpowers/
+
+.worktrees/
+
+# Unrelated experiments in this folder
+Gemini.bat
+GeminiStudio.ps1
+studio.html
+studio_server.py
+chats/
+vnc_*.png

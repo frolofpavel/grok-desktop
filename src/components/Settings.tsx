@@ -1,0 +1,2625 @@
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
+import { useProject } from '../store/projectStore'
+import type { Memory, DetectedCli, AuditEntry, DoctorReport, DoctorItem, DoctorStatus, ProviderDescriptorDTO, PolicyMatrixDTO, PolicyDecision, AgentModeId } from '../types/api'
+import type { ProviderId } from '../hooks/useProvider'
+import { useTheme, THEMES } from '../hooks/useTheme'
+import type { AutonomousStatus } from '../types/api'
+import { ProfilesTab } from './ProfilesTab'
+import { buildCatalog, connectionStatus, type ConnectionStatus } from '../lib/model-catalog'
+import {
+  IconClaude, Icon1C, IconGoogleSheets, IconTelegram,
+  IconSSH, IconBitrix, IconYandexDirect, IconYandexDisk,
+  IconSkillsServer, IconPlug, IconHTTP, IconGitHub, IconSocialPublish
+} from './ConnectorIcons'
+import { useT } from '../i18n'
+import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../lib/mcp-risk'
+
+interface ProviderConfig {
+  id: ProviderId
+  name: string
+  transport: 'API' | 'CLI'
+  description: string
+  models: string[]
+  defaultModel: string
+  secretKey: string | null
+  keyHint: string
+  keyLink?: { url: string; label: string }
+  supportsTools: boolean
+}
+
+const PROVIDERS: ProviderConfig[] = [
+  {
+    id: 'gemini-api',
+    name: 'Gemini',
+    transport: 'API',
+    description: 'Google. Полный агентский режим с tools.',
+    models: ['gemini-3-pro', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    defaultModel: 'gemini-3.5-flash',
+    secretKey: 'gemini_api_key',
+    keyHint: 'AIzaSy…',
+    keyLink: { url: 'https://aistudio.google.com', label: 'AI Studio' },
+    supportsTools: true
+  },
+  {
+    id: 'gemini-cli',
+    name: 'Gemini CLI',
+    transport: 'CLI',
+    description: 'Твоя Gemini Ultra подписка через gemini-cli. Без API ключа.',
+    models: ['auto', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
+    defaultModel: 'auto',
+    secretKey: null,
+    keyHint: '',
+    supportsTools: false
+  },
+  {
+    id: 'claude',
+    name: 'Claude',
+    transport: 'API',
+    description: 'Anthropic. Полный агентский режим с tools.',
+    models: ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101'],
+    defaultModel: 'claude-sonnet-4-5-20251101',
+    secretKey: 'anthropic_api_key',
+    keyHint: 'sk-ant-…',
+    keyLink: { url: 'https://console.anthropic.com', label: 'Anthropic Console' },
+    supportsTools: true
+  },
+  {
+    id: 'claude-cli',
+    name: 'Claude Code',
+    transport: 'CLI',
+    description: 'Твоя Claude Pro/Max подписка через claude CLI.',
+    models: ['auto', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'],
+    defaultModel: 'auto',
+    secretKey: null,
+    keyHint: '',
+    supportsTools: false
+  },
+  {
+    id: 'grok',
+    name: 'Grok',
+    transport: 'API',
+    description: 'xAI. Полный агентский режим с tools.',
+    models: ['grok-4', 'grok-4-fast', 'grok-3'],
+    defaultModel: 'grok-4',
+    secretKey: 'xai_api_key',
+    keyHint: 'xai-…',
+    keyLink: { url: 'https://console.x.ai', label: 'xAI Console' },
+    supportsTools: true
+  },
+  {
+    id: 'grok-cli',
+    name: 'Grok Build',
+    transport: 'CLI',
+    description: 'Твоя x.com/SuperGrok подписка через grok CLI.',
+    models: ['auto', 'grok-4', 'grok-4-fast', 'grok-code-fast-1', 'grok-3'],
+    defaultModel: 'auto',
+    secretKey: null,
+    keyHint: '',
+    supportsTools: false
+  },
+  {
+    id: 'openai',
+    name: 'ChatGPT',
+    transport: 'API',
+    description: 'OpenAI. Полный агентский режим с tools.',
+    models: ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
+    defaultModel: 'gpt-5',
+    secretKey: 'openai_api_key',
+    keyHint: 'sk-…',
+    keyLink: { url: 'https://platform.openai.com/api-keys', label: 'OpenAI Platform' },
+    supportsTools: true
+  },
+  {
+    id: 'codex-cli',
+    name: 'Codex CLI',
+    transport: 'CLI',
+    description: 'Твоя ChatGPT Plus/Pro подписка через codex CLI.',
+    models: ['auto', 'gpt-5-codex', 'gpt-5', 'gpt-5-mini', 'o3', 'o3-mini', 'gpt-4o'],
+    defaultModel: 'auto',
+    secretKey: null,
+    keyHint: '',
+    supportsTools: false
+  },
+  // OpenAI-compatible extra-провайдеры (zеркало EXTRA_PROVIDERS из electron/ai/extra-providers.ts).
+  // При обновлении расширений — обновляй ОБА файла; renderer не имеет доступа к main.
+  {
+    id: 'openrouter',
+    name: 'OpenRouter',
+    transport: 'API',
+    description: 'Один ключ → все модели (Claude, GPT, Gemini, Grok, open-source).',
+    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
+    defaultModel: 'anthropic/claude-sonnet-4-6',
+    secretKey: 'openrouter_api_key',
+    keyHint: 'sk-or-...',
+    keyLink: { url: 'https://openrouter.ai/keys', label: 'openrouter.ai/keys' },
+    supportsTools: true
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    transport: 'API',
+    description: 'Китайские модели V4 за копейки. v4-flash / v4-pro (reasoning). Лучший fallback для бюджета.',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
+    defaultModel: 'deepseek-v4-flash',
+    secretKey: 'deepseek_api_key',
+    keyHint: 'sk-...',
+    keyLink: { url: 'https://platform.deepseek.com/api_keys', label: 'platform.deepseek.com' },
+    supportsTools: true
+  },
+  {
+    id: 'moonshot',
+    name: 'Moonshot Kimi',
+    transport: 'API',
+    description: 'Китайский Kimi K2.6 — SoTA по агентам и коду. Дёшево, длинный контекст, OpenAI-совместим.',
+    models: ['kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
+    defaultModel: 'kimi-k2.6',
+    secretKey: 'moonshot_api_key',
+    keyHint: 'sk-...',
+    keyLink: { url: 'https://platform.moonshot.ai/console/api-keys', label: 'platform.moonshot.ai' },
+    supportsTools: true
+  },
+  {
+    id: 'qwen',
+    name: 'Qwen (Alibaba)',
+    transport: 'API',
+    description: 'Alibaba Qwen3 через DashScope. qwen3-coder-plus — кодер, qwen3-max — флагман. OpenAI-совместим.',
+    models: ['qwen3-max', 'qwen3-coder-plus', 'qwen3-coder-flash', 'qwen-max', 'qwen-plus', 'qwen-flash'],
+    defaultModel: 'qwen3-coder-plus',
+    secretKey: 'qwen_api_key',
+    keyHint: 'sk-...',
+    keyLink: { url: 'https://bailian.console.aliyun.com/', label: 'bailian.console.aliyun.com' },
+    supportsTools: true
+  },
+  {
+    id: 'mistral',
+    name: 'Mistral',
+    transport: 'API',
+    description: 'Европейский провайдер. Без санкционных рисков. Codestral хорош для кода.',
+    models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'ministral-8b-latest'],
+    defaultModel: 'mistral-large-latest',
+    secretKey: 'mistral_api_key',
+    keyHint: 'API key...',
+    keyLink: { url: 'https://console.mistral.ai/api-keys', label: 'console.mistral.ai' },
+    supportsTools: true
+  },
+  {
+    id: 'groq',
+    name: 'Groq',
+    transport: 'API',
+    description: 'LPU-инференс: Llama/Mixtral на 500+ tok/s. Для streaming-чатов где важна реакция.',
+    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+    defaultModel: 'llama-3.3-70b-versatile',
+    secretKey: 'groq_api_key',
+    keyHint: 'gsk_...',
+    keyLink: { url: 'https://console.groq.com/keys', label: 'console.groq.com' },
+    supportsTools: true
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama (local)',
+    transport: 'API',
+    description: 'Локальный сервер. Запусти `ollama serve`. $0, без интернета, данные не уходят.',
+    models: ['llama3.3', 'qwen2.5-coder', 'deepseek-r1', 'mistral', 'gemma2'],
+    defaultModel: 'llama3.3',
+    secretKey: null,
+    keyHint: '',
+    supportsTools: true
+  },
+  // 🇷🇺 Российские провайдеры. Mark в description для отличия.
+  {
+    id: 'yandex-gpt',
+    name: 'YandexGPT',
+    transport: 'API',
+    description: '🇷🇺 152-ФЗ совместим. Yandex Cloud Foundation Models.',
+    models: ['yandexgpt/latest', 'yandexgpt-lite/latest', 'yandexgpt-32k/latest'],
+    defaultModel: 'yandexgpt/latest',
+    secretKey: 'yandex_api_key',
+    keyHint: 'AQVN…',
+    keyLink: { url: 'https://console.yandex.cloud/iam', label: 'Yandex Cloud Console' },
+    supportsTools: false
+  },
+  {
+    id: 'gigachat',
+    name: 'GigaChat',
+    transport: 'API',
+    description: '🇷🇺 152-ФЗ совместим. Сбер. GigaChat Lite / Plus / Pro / Max.',
+    models: ['GigaChat', 'GigaChat-Plus', 'GigaChat-Pro', 'GigaChat-Max'],
+    defaultModel: 'GigaChat',
+    secretKey: 'gigachat_client_id',
+    keyHint: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    keyLink: { url: 'https://developers.sber.ru/portal/products/gigachat-api', label: 'developers.sber.ru' },
+    supportsTools: false
+  },
+  {
+    id: 'custom-openai',
+    name: 'Свой провайдер (OpenAI-compatible)',
+    transport: 'API',
+    description: 'Любой self-hosted endpoint совместимый с OpenAI API: vLLM, LM Studio, корпоративный шлюз.',
+    models: [], // Заполняется юзером через custom-блок в UI
+    defaultModel: '',
+    secretKey: 'custom_openai_api_key',
+    keyHint: '(опционально если endpoint требует)',
+    supportsTools: true
+  }
+]
+
+type Tab = 'appearance' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
+
+// TAB_GROUPS is built inside the Settings component to support i18n translations.
+
+function modelKey(providerId: ProviderId, model: string): string {
+  return `${providerId}::${model}`
+}
+function allModelsSet(): Set<string> {
+  const s = new Set<string>()
+  for (const p of PROVIDERS) {
+    for (const m of p.models) s.add(modelKey(p.id, m))
+  }
+  return s
+}
+
+interface ConnectorDef {
+  id: string
+  name: string
+  description: string
+  icon: React.FC<{ size?: number }>
+  configuredKey: string  // settings key to check — if non-empty, connector is "connected"
+}
+
+const CONNECTORS: ConnectorDef[] = [
+  { id: 'claude-oauth', name: 'Claude Code', description: 'OAuth token для Max подписки', icon: IconClaude, configuredKey: 'claude_code_oauth_token' },
+  { id: 'onec', name: '1С OData', description: 'ERP-система, справочники, документы', icon: Icon1C, configuredKey: 'onec_base_url' },
+  { id: 'http', name: 'HTTP API', description: 'Произвольные REST endpoints', icon: IconHTTP, configuredKey: '' },
+  { id: 'gsheets', name: 'Google Sheets', description: 'Таблицы, данные, отчёты', icon: IconGoogleSheets, configuredKey: 'gsheets_service_account_json' },
+  { id: 'telegram', name: 'Telegram', description: 'Бот для уведомлений и команд', icon: IconTelegram, configuredKey: 'telegram_bot_token' },
+  { id: 'ssh', name: 'SSH', description: 'Удалённое выполнение команд', icon: IconSSH, configuredKey: 'ssh_default_host' },
+  { id: 'bitrix', name: 'Битрикс24', description: 'CRM, сделки, задачи', icon: IconBitrix, configuredKey: 'bitrix24_webhook_url' },
+  { id: 'ydirect', name: 'Яндекс.Директ', description: 'Рекламные кампании и отчёты', icon: IconYandexDirect, configuredKey: 'yandex_direct_token' },
+  { id: 'ydisk', name: 'Яндекс.Диск', description: 'Файлы и шеринг артефактов', icon: IconYandexDisk, configuredKey: 'yandex_disk_token' },
+  { id: 'skills-server', name: 'Сервер скиллов', description: 'Удалённые AI-скиллы', icon: IconSkillsServer, configuredKey: 'skills_server_base' },
+  { id: 'github', name: 'GitHub', description: 'Репозитории, issues, PR, code search', icon: IconGitHub, configuredKey: 'github_token' },
+  { id: 'social-publish', name: 'Social Publish', description: 'Постинг в Telegram, VK, webhooks', icon: IconSocialPublish, configuredKey: 'social_publish_telegram_channels' },
+]
+
+// ─── MCP Tab ─────────────────────────────────────────────────────────────────
+
+import type { McpServerEntry, McpTool, PopularMcpServer } from '../types/api'
+
+// ── MCP Hardening — review-before-trust helpers ──────────────────────────────
+
+/** Бейдж scope: иконка + русская подпись + класс цвета. */
+const SCOPE_META: Record<McpScope, { icon: string; label: string }> = {
+  read:    { icon: '🟢', label: 'чтение' },
+  write:   { icon: '🟡', label: 'запись' },
+  network: { icon: '🌐', label: 'сеть' },
+  command: { icon: '🔴', label: 'команда' },
+  unknown: { icon: '⚪', label: 'неизвестно' }
+}
+
+/** Человекочитаемая сводка по scope-ам сервера, напр. «3 чтение · 2 запись · 1 команда». */
+function scopeSummary(scopes: Record<McpScope, number>): string {
+  const order: McpScope[] = ['read', 'write', 'network', 'command', 'unknown']
+  return order
+    .filter(s => scopes[s] > 0)
+    .map(s => `${scopes[s]} ${SCOPE_META[s].label}`)
+    .join(' · ')
+}
+
+/** Манифест сервера, собранный после connect + классификации. */
+interface McpManifest {
+  tools: Array<McpTool & { scope: McpScope }>
+  risk: McpRisk
+  scopes: Record<McpScope, number>
+  toolCount: number
+  /** Имена env-переменных из конфига сервера + флаг «пусто». */
+  env: Array<{ key: string; empty: boolean }>
+}
+
+/** Парсит env-JSON сервера в список требований. */
+function parseEnvRequirements(envJson: string): Array<{ key: string; empty: boolean }> {
+  try {
+    const obj = JSON.parse(envJson || '{}') as Record<string, unknown>
+    return Object.keys(obj).map(key => ({
+      key,
+      empty: !String(obj[key] ?? '').trim()
+    }))
+  } catch {
+    return []
+  }
+}
+
+// === Policy Center ===
+// Read-only экран «что разрешено агенту»: матрица decide(tool, mode) по 5 режимам
+// + опасные команды. Логика НЕ дублируется — данные приходят из policy:matrix.
+
+const POLICY_CATEGORY_LABELS: Record<string, string> = {
+  read: 'Чтение',
+  edit: 'Правка файлов',
+  command: 'Команды',
+  connector: 'Коннекторы'
+}
+
+const POLICY_DECISION_META: Record<PolicyDecision, { label: string; cls: string }> = {
+  'auto-accept': { label: 'авто',   cls: 'auto' },
+  'confirm':     { label: 'спросит', cls: 'confirm' },
+  'block':       { label: 'блок',   cls: 'block' }
+}
+
+function PolicyTab() {
+  const [matrix, setMatrix] = useState<PolicyMatrixDTO | null>(null)
+  const [currentMode, setCurrentMode] = useState<AgentModeId | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      const m = await window.api.policy.matrix()
+      setMatrix(m)
+      const mode = await window.api.settings.getKey('agent_mode')
+      setCurrentMode((mode as AgentModeId) || 'ask')
+    })()
+  }, [])
+
+  if (!matrix) {
+    return <div className="gg-settings-extra"><div className="gg-settings-hint">Загрузка политики…</div></div>
+  }
+
+  return (
+    <div className="gg-settings-extra gg-policy">
+      <div className="gg-settings-section-title">🛡 Что разрешено агенту</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 14 }}>
+        Единое окно контроля: как разрешается каждое действие агента в зависимости от активного режима.
+        Чтение всегда разрешено. Правки файлов и команды гейтятся режимом. Текущий режим подсвечен.
+      </div>
+
+      <div className="gg-policy-matrix-wrap">
+        <table className="gg-policy-matrix">
+          <thead>
+            <tr>
+              <th className="gg-policy-cat-head">Действие</th>
+              {matrix.modes.map(m => (
+                <th
+                  key={m.id}
+                  className={m.id === currentMode ? 'gg-policy-mode-current' : undefined}
+                  title={m.description}
+                >
+                  <span className="gg-policy-mode-icon">{m.icon}</span>
+                  <span className="gg-policy-mode-label">{m.label}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {matrix.rows.map(row => (
+              <tr key={row.tool}>
+                <td className="gg-policy-cat">
+                  <span className="gg-policy-cat-name">{POLICY_CATEGORY_LABELS[row.category] || row.category}</span>
+                  <code className="gg-policy-tool">{row.tool}</code>
+                </td>
+                {matrix.modes.map(m => {
+                  const dec = row.decisions[m.id]
+                  const meta = POLICY_DECISION_META[dec]
+                  return (
+                    <td
+                      key={m.id}
+                      className={m.id === currentMode ? 'gg-policy-mode-current' : undefined}
+                    >
+                      <span className={`gg-policy-chip ${meta.cls}`}>{meta.label}</span>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="gg-policy-legend">
+        <span className="gg-policy-chip auto">авто</span> — выполняется сразу, без диалога
+        <span className="gg-policy-chip confirm">спросит</span> — покажет diff / команду и ждёт подтверждения
+        <span className="gg-policy-chip block">блок</span> — действие запрещено активным режимом
+      </div>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>⛔ Опасные команды</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+        Эти команды блокируются <strong>всегда</strong> — даже с подтверждением и в режиме «Без подтверждений».
+        Денилист — последний предохранитель.
+      </div>
+      <ul className="gg-policy-danger">
+        {matrix.commandDanger.map((d, i) => (
+          <li key={i}>{d}</li>
+        ))}
+      </ul>
+
+      <div className="gg-policy-note">
+        Риск по конкретным MCP-инструментам (per-server) — на вкладке <strong>MCP</strong>. Здесь он не дублируется.
+      </div>
+    </div>
+  )
+}
+
+function McpTab() {
+  const [servers, setServers] = useState<McpServerEntry[]>([])
+  const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set())
+  const [toolCounts, setToolCounts] = useState<Record<string, number>>({})
+  const [showAdd, setShowAdd] = useState(false)
+  const [popular, setPopular] = useState<PopularMcpServer[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [newForm, setNewForm] = useState({ name: '', command: '', args: '', env: '' })
+  // MCP Hardening — превью манифеста сервера (review-before-trust).
+  const [manifests, setManifests] = useState<Record<string, McpManifest>>({})
+  const [previewBusy, setPreviewBusy] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    void loadAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function loadAll() {
+    try {
+      const [svrs, tools, pop] = await Promise.all([
+        window.api.mcp.listServers(),
+        window.api.mcp.tools(),
+        window.api.mcp.popular()
+      ])
+      setServers(svrs)
+      setPopular(pop)
+      const ids = new Set<string>()
+      const counts: Record<string, number> = {}
+      for (const t of tools as McpTool[]) {
+        ids.add(t.serverId)
+        counts[t.serverId] = (counts[t.serverId] ?? 0) + 1
+      }
+      setConnectedIds(ids)
+      setToolCounts(counts)
+    } catch { /* ignore */ }
+  }
+
+  async function handleConnect(id: string) {
+    setBusy(id); setError(null)
+    try {
+      const tools = await window.api.mcp.connect(id) as McpTool[]
+      setConnectedIds(prev => new Set([...prev, id]))
+      setToolCounts(prev => ({ ...prev, [id]: tools.length }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(null) }
+  }
+
+  async function handleDisconnect(id: string) {
+    setBusy(id); setError(null)
+    try {
+      await window.api.mcp.disconnect(id)
+      setConnectedIds(prev => { const s = new Set(prev); s.delete(id); return s })
+      setToolCounts(prev => { const c = { ...prev }; delete c[id]; return c })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(null) }
+  }
+
+  // MCP Hardening — подключиться, перечислить инструменты, классифицировать → манифест.
+  async function handlePreview(s: McpServerEntry) {
+    if (manifests[s.id]) {
+      // toggle — повторный клик сворачивает карточку
+      setManifests(prev => { const m = { ...prev }; delete m[s.id]; return m })
+      return
+    }
+    setPreviewBusy(s.id)
+    setPreviewError(prev => { const e = { ...prev }; delete e[s.id]; return e })
+    try {
+      const tools = await window.api.mcp.connect(s.id) as McpTool[]
+      const agg = classifyServer(tools)
+      const manifest: McpManifest = {
+        tools: tools.map(t => ({ ...t, scope: classifyTool(t).scope })),
+        risk: agg.risk,
+        scopes: agg.scopes,
+        toolCount: agg.toolCount,
+        env: parseEnvRequirements(s.env)
+      }
+      setManifests(prev => ({ ...prev, [s.id]: manifest }))
+      // connect фактически подключает сервер — отражаем это в общем состоянии
+      setConnectedIds(prev => new Set([...prev, s.id]))
+      setToolCounts(prev => ({ ...prev, [s.id]: tools.length }))
+    } catch (e) {
+      setPreviewError(prev => ({ ...prev, [s.id]: e instanceof Error ? e.message : String(e) }))
+    } finally {
+      setPreviewBusy(null)
+    }
+  }
+
+  async function handleToggle(id: string, enabled: boolean) {
+    await window.api.mcp.toggleServer(id, enabled)
+    setServers(prev => prev.map(s => s.id === id ? { ...s, enabled } : s))
+  }
+
+  async function handleRemove(id: string) {
+    if (!confirm('Удалить MCP сервер?')) return
+    await window.api.mcp.removeServer(id)
+    setServers(prev => prev.filter(s => s.id !== id))
+    setConnectedIds(prev => { const s = new Set(prev); s.delete(id); return s })
+  }
+
+  async function handleAdd() {
+    if (!newForm.name.trim() || !newForm.command.trim()) return
+    // Validate JSON args/env
+    let argsStr = newForm.args.trim() || '[]'
+    let envStr = newForm.env.trim() || '{}'
+    // If args is a space-separated string, convert to JSON array
+    if (!argsStr.startsWith('[')) {
+      argsStr = JSON.stringify(argsStr.split(/\s+/).filter(Boolean))
+    }
+    try { JSON.parse(argsStr) } catch { argsStr = '[]' }
+    try { JSON.parse(envStr) } catch { envStr = '{}' }
+
+    const entry = await window.api.mcp.addServer({
+      name: newForm.name,
+      command: newForm.command,
+      args: argsStr,
+      env: envStr,
+      enabled: true
+    })
+    setServers(prev => [...prev, entry])
+    setNewForm({ name: '', command: '', args: '', env: '' })
+    setShowAdd(false)
+  }
+
+  function fillFromPopular(p: PopularMcpServer) {
+    setNewForm({
+      name: p.name,
+      command: p.command,
+      args: JSON.stringify(p.args),
+      env: p.envHint ? `{"${p.envHint}": ""}` : '{}'
+    })
+    setShowAdd(true)
+  }
+
+  return (
+    <div className="gg-settings-extra gg-mcp-tab">
+      <div className="gg-settings-section-title">⚡ MCP Серверы — Model Context Protocol</div>
+      <div className="gg-settings-hint" style={{ marginBottom: 16 }}>
+        Подключай внешние MCP-серверы чтобы расширить возможности агента: поиск в интернете,
+        базы данных, GitHub, браузер и многое другое. Инструменты сервера автоматически
+        добавляются в арсенал AI.
+      </div>
+
+      {error && (
+        <div className="gg-settings-hint" style={{ color: 'var(--error, #dc3545)', marginBottom: 12 }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      {/* Список серверов */}
+      {servers.length === 0 ? (
+        <div className="gg-text-tertiary" style={{ padding: '12px 0', fontSize: 'var(--text-sm)' }}>
+          Нет настроенных MCP-серверов. Добавь ниже или выбери из популярных.
+        </div>
+      ) : (
+        <div className="gg-mcp-server-list">
+          {servers.map(s => {
+            const connected = connectedIds.has(s.id)
+            const count = toolCounts[s.id] ?? 0
+            const manifest = manifests[s.id]
+            const pError = previewError[s.id]
+            return (
+              <div key={s.id} className={`gg-mcp-server-card ${connected ? 'is-connected' : ''}`}>
+                <div className="gg-mcp-server-row">
+                  <div className="gg-mcp-server-info">
+                    <div className="gg-mcp-server-name">
+                      {s.name}
+                      {connected && <span className="gg-badge-connected" style={{ marginLeft: 8 }}>✓ {count} tools</span>}
+                    </div>
+                    <div className="gg-mcp-server-cmd" title={`${s.command} ${JSON.parse(s.args || '[]').join(' ')}`}>
+                      {s.command} {JSON.parse(s.args || '[]').join(' ')}
+                    </div>
+                  </div>
+                  <div className="gg-mcp-server-actions">
+                    <button
+                      className="gg-btn gg-btn-ghost"
+                      onClick={() => void handlePreview(s)}
+                      disabled={previewBusy === s.id}
+                      title="Подключиться, показать инструменты и оценить риск ДО доверия серверу"
+                    >{previewBusy === s.id ? '…' : (manifest ? '✕ Свернуть' : '🔍 Проверить возможности')}</button>
+                    <label className="gg-toggle" title="Включить/отключить сервер">
+                      <input
+                        type="checkbox"
+                        checked={s.enabled}
+                        onChange={e => void handleToggle(s.id, e.target.checked)}
+                      />
+                      <span className="gg-toggle-slider" />
+                    </label>
+                    {connected ? (
+                      <button
+                        className="gg-btn gg-btn-ghost"
+                        onClick={() => void handleDisconnect(s.id)}
+                        disabled={busy === s.id}
+                      >{busy === s.id ? '…' : 'Отключить'}</button>
+                    ) : (
+                      <button
+                        className="gg-btn gg-btn-primary"
+                        onClick={() => void handleConnect(s.id)}
+                        disabled={busy === s.id || !s.enabled}
+                      >{busy === s.id ? '…' : 'Подключить'}</button>
+                    )}
+                    <button
+                      className="gg-btn gg-btn-ghost"
+                      style={{ color: 'var(--error, #dc3545)' }}
+                      onClick={() => void handleRemove(s.id)}
+                      title="Удалить сервер"
+                    >✕</button>
+                  </div>
+                </div>
+
+                {pError && (
+                  <div className="gg-mcp-manifest-error">⚠ Не удалось проверить: {pError}</div>
+                )}
+
+                {manifest && (
+                  <div className="gg-mcp-manifest">
+                    <div className="gg-mcp-manifest-head">
+                      <span className={`gg-mcp-risk-pill is-${manifest.risk}`}>
+                        {manifest.risk === 'high' ? 'Высокий риск' : manifest.risk === 'medium' ? 'Средний риск' : 'Низкий риск'}
+                      </span>
+                      <span className="gg-mcp-manifest-summary">
+                        {manifest.toolCount} инстр. · {scopeSummary(manifest.scopes) || '—'}
+                      </span>
+                    </div>
+
+                    {manifest.risk === 'high' && (
+                      <div className="gg-mcp-manifest-warn">
+                        ⚠️ Этот сервер может выполнять команды / писать файлы — включай только если доверяешь источнику.
+                      </div>
+                    )}
+
+                    <div className="gg-mcp-manifest-env-title">Требуемые env-переменные</div>
+                    {manifest.env.length === 0 ? (
+                      <div className="gg-mcp-manifest-env-empty">Не требуются</div>
+                    ) : (
+                      <div className="gg-mcp-manifest-env">
+                        {manifest.env.map(e => (
+                          <span key={e.key} className={`gg-mcp-env-chip ${e.empty ? 'is-empty' : ''}`} title={e.empty ? 'Значение пустое — задай перед использованием' : 'Заполнено'}>
+                            <code>{e.key}</code>{e.empty && <span className="gg-mcp-env-flag"> · пусто</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="gg-mcp-manifest-tools-title">Инструменты ({manifest.toolCount})</div>
+                    <div className="gg-mcp-manifest-tools">
+                      {manifest.tools.map(t => (
+                        <div key={t.name} className="gg-mcp-tool-row">
+                          <span className={`gg-mcp-scope-badge is-${t.scope}`} title={SCOPE_META[t.scope].label}>
+                            {SCOPE_META[t.scope].icon} {SCOPE_META[t.scope].label}
+                          </span>
+                          <div className="gg-mcp-tool-text">
+                            <div className="gg-mcp-tool-name">{t.name}</div>
+                            {t.description && <div className="gg-mcp-tool-desc">{t.description}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Форма добавления */}
+      {showAdd ? (
+        <div className="gg-mcp-add-form">
+          <div className="gg-settings-section-title" style={{ marginTop: 0 }}>Новый MCP сервер</div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Название</label>
+            <input className="gg-input" value={newForm.name} onChange={e => setNewForm(f => ({ ...f, name: e.target.value }))} placeholder="Brave Search" />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Команда</label>
+            <input className="gg-input" value={newForm.command} onChange={e => setNewForm(f => ({ ...f, command: e.target.value }))} placeholder="npx" spellCheck={false} />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Аргументы (JSON)</label>
+            <input className="gg-input" value={newForm.args} onChange={e => setNewForm(f => ({ ...f, args: e.target.value }))} placeholder='["-y", "@anthropic-ai/mcp-server-brave-search"]' spellCheck={false} style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Env (JSON)</label>
+            <input className="gg-input" value={newForm.env} onChange={e => setNewForm(f => ({ ...f, env: e.target.value }))} placeholder='{"BRAVE_API_KEY": "your-key"}' spellCheck={false} style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button className="gg-btn gg-btn-primary" onClick={() => void handleAdd()}>Добавить</button>
+            <button className="gg-btn gg-btn-ghost" onClick={() => setShowAdd(false)}>Отмена</button>
+          </div>
+        </div>
+      ) : (
+        <button className="gg-btn gg-btn-primary" style={{ marginTop: 12 }} onClick={() => setShowAdd(true)}>
+          + Добавить MCP сервер
+        </button>
+      )}
+
+      {/* Популярные серверы */}
+      {popular.length > 0 && (
+        <>
+          <div className="gg-settings-section-title" style={{ marginTop: 24 }}>Популярные серверы</div>
+          <div className="gg-mcp-popular-list">
+            {popular.map(p => (
+              <div key={p.name} className="gg-mcp-popular-item">
+                <div className="gg-mcp-popular-name">{p.name}</div>
+                <div className="gg-mcp-popular-desc">{p.description}</div>
+                {p.envHint && <div className="gg-mcp-popular-env">Нужен env: <code>{p.envHint}</code></div>}
+                <button className="gg-btn gg-btn-ghost" onClick={() => fillFromPopular(p)}>Использовать</button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="gg-settings-hint" style={{ marginTop: 20 }}>
+        MCP (Model Context Protocol) — открытый стандарт Anthropic для подключения
+        AI к внешним данным и инструментам. Серверы запускаются как дочерние процессы.
+        Подробнее: <code>modelcontextprotocol.io</code>
+      </div>
+    </div>
+  )
+}
+
+// ─── Provider Health Matrix ───────────────────────────────────────────────────
+// Усиливает мульти-провайдерность как продуктовую фичу: одна таблица — где ключ
+// настроен, цена дефолтной модели и privacy-tier (где живут данные). Источники:
+// providers.list() (дескрипторы) ⋈ doctor.run() (config-presence статус) +
+// buildCatalog() (цены per-model). Renderer-only, без новых IPC.
+// FUTURE: живой latency-ping провайдера — сейчас doctor проверяет только наличие
+// ключа в конфиге, без реального сетевого запроса.
+
+type PrivacyTier = 'fz152' | 'local' | 'cloud'
+
+/** Privacy-tier по id провайдера: где физически обрабатываются данные. */
+function privacyTier(providerId: string): PrivacyTier {
+  if (providerId === 'yandex-gpt' || providerId === 'gigachat') return 'fz152'
+  if (providerId === 'ollama' || providerId === 'custom-openai' || providerId === 'llamacpp' || providerId.includes('local')) return 'local'
+  return 'cloud'
+}
+
+const PRIVACY_META: Record<PrivacyTier, { label: string; title: string }> = {
+  fz152: { label: '🔒 152-ФЗ', title: 'Российский провайдер, 152-ФЗ совместим — данные не покидают РФ' },
+  local: { label: '🏠 локально', title: 'Локальный/self-hosted — данные не уходят с машины' },
+  cloud: { label: '☁️ облако', title: 'Облачный провайдер — данные уходят на сервера провайдера' }
+}
+
+/** Метаданные статуса ключа для строки матрицы. */
+function matrixStatusMeta(status: DoctorStatus): { label: string; cls: string } {
+  if (status === 'ok') return { label: '✅ настроен', cls: 'is-ok' }
+  if (status === 'no-key') return { label: '⚠️ нет ключа', cls: 'is-missing' }
+  return { label: '—', cls: 'is-na' } // n-a (CLI / local)
+}
+
+/** Цена дефолтной модели провайдера ($ / 1M in·out) из каталога, или null. */
+function defaultModelPrice(p: ProviderDescriptorDTO): { input: number; output: number } | null {
+  const catalog = buildCatalog([{
+    id: p.id as ProviderId,
+    name: p.name,
+    transport: p.transport,
+    supportsTools: p.supportsTools,
+    models: p.models,
+    defaultModel: p.defaultModel
+  }])
+  const entry = catalog.find(e => e.model === p.defaultModel)
+  if (!entry || entry.pricePerMInput === null || entry.pricePerMOutput === null) return null
+  return { input: entry.pricePerMInput, output: entry.pricePerMOutput }
+}
+
+interface MatrixRow {
+  id: string
+  name: string
+  transport: 'API' | 'CLI'
+  defaultModel: string
+  status: DoctorStatus
+  price: { input: number; output: number } | null
+  tier: PrivacyTier
+}
+
+/**
+ * Таблица здоровья провайдеров. Принимает уже загруженный doctor-отчёт (чтобы
+ * не дублировать doctor.run — он живёт в DoctorPanel) и сам тянет providers.list.
+ */
+function ProviderHealthMatrix({ report }: { report: DoctorReport }) {
+  const [providers, setProviders] = useState<ProviderDescriptorDTO[] | null>(null)
+
+  useEffect(() => {
+    void window.api.providers.list().then(setProviders).catch(() => setProviders([]))
+  }, [])
+
+  const rows: MatrixRow[] = useMemo(() => {
+    if (!providers) return []
+    const statusById = new Map(report.providers.map(d => [d.id, d.status]))
+    const built = providers.map<MatrixRow>(p => ({
+      id: p.id,
+      name: p.name,
+      transport: p.transport,
+      defaultModel: p.defaultModel,
+      status: statusById.get(p.id) ?? 'n-a',
+      price: defaultModelPrice(p),
+      tier: privacyTier(p.id)
+    }))
+    // Sort: настроенные (ok) первыми, затем по имени.
+    return built.sort((a, b) => {
+      const ar = a.status === 'ok' ? 0 : 1
+      const br = b.status === 'ok' ? 0 : 1
+      if (ar !== br) return ar - br
+      return a.name.localeCompare(b.name)
+    })
+  }, [providers, report])
+
+  if (!providers) {
+    return <div className="gg-settings-hint" style={{ marginTop: 8 }}>Загрузка провайдеров…</div>
+  }
+
+  return (
+    <div className="gg-health-matrix">
+      <div className="gg-settings-section-title">Матрица провайдеров</div>
+      <table className="gg-health-table">
+        <thead>
+          <tr>
+            <th>Провайдер</th>
+            <th>Ключ / статус</th>
+            <th>Цена (in / out за 1M)</th>
+            <th>Privacy</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const st = matrixStatusMeta(r.status)
+            const tier = PRIVACY_META[r.tier]
+            return (
+              <tr key={r.id}>
+                <td>
+                  <span className="gg-health-provider">{r.name}</span>
+                  <span className={`gg-health-transport is-${r.transport.toLowerCase()}`}>{r.transport}</span>
+                </td>
+                <td><span className={`gg-health-status ${st.cls}`}>{st.label}</span></td>
+                <td className="gg-health-price">
+                  {r.price
+                    ? <span title={`Дефолтная модель: ${r.defaultModel}`}>${r.price.input} / ${r.price.output}</span>
+                    : <span className="gg-health-na">—</span>}
+                </td>
+                <td><span className={`gg-health-tier is-${r.tier}`} title={tier.title}>{tier.label}</span></td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      <div className="gg-health-legend">
+        <span><span className="gg-health-status is-ok">✅ настроен</span> ключ задан</span>
+        <span><span className="gg-health-status is-missing">⚠️ нет ключа</span> добавь в «Провайдеры»</span>
+        <span><span className="gg-health-status is-na">—</span> CLI/локально (ключ не нужен)</span>
+        <span>🔒 152-ФЗ · 🏠 локально · ☁️ облако</span>
+      </div>
+    </div>
+  )
+}
+
+// ─── Doctor panel ─────────────────────────────────────────────────────────────
+
+/** Иконка/цвет статуса пункта диагностики. */
+function doctorStatusIcon(status: DoctorItem['status']): { icon: string; color: string } {
+  if (status === 'ok') return { icon: '✓', color: 'var(--gg-success, #3fb950)' }
+  if (status === 'no-key') return { icon: '✗', color: 'var(--gg-danger, #f85149)' }
+  return { icon: '—', color: 'var(--gg-text-dim, #8b949e)' } // n-a
+}
+
+function DoctorRow({ item }: { item: DoctorItem }) {
+  const s = doctorStatusIcon(item.status)
+  return (
+    <div className="gg-settings-row" style={{ alignItems: 'baseline', gap: 8 }}>
+      <span style={{ color: s.color, fontWeight: 700, width: 16, display: 'inline-block' }}>{s.icon}</span>
+      <span style={{ minWidth: 140, fontWeight: 600 }}>{item.name}</span>
+      <span className="gg-settings-hint" style={{ margin: 0 }}>{item.detail}</span>
+    </div>
+  )
+}
+
+/** Кнопка «Проверка» + вывод отчёта по провайдерам и коннекторам. */
+function DoctorPanel() {
+  const [report, setReport] = useState<DoctorReport | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  async function run() {
+    setLoading(true)
+    try {
+      const r = await window.api.doctor.run()
+      setReport(r)
+    } catch {
+      setReport(null)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="gg-doctor-panel" style={{ marginBottom: 16 }}>
+      <div className="gg-settings-row" style={{ alignItems: 'center', gap: 12 }}>
+        <button className="gg-btn gg-btn-primary" onClick={() => void run()} disabled={loading}>
+          {loading ? 'Проверка…' : '🩺 Проверка (Doctor)'}
+        </button>
+        {report && (
+          <span className="gg-settings-hint" style={{ margin: 0 }}>
+            Готово: {report.summary.okCount} · Проблем: {report.summary.problemCount}
+          </span>
+        )}
+      </div>
+      {report && (
+        <div style={{ marginTop: 12 }}>
+          <ProviderHealthMatrix report={report} />
+          <div className="gg-settings-section-title" style={{ marginTop: 16 }}>Провайдеры</div>
+          {report.providers.map(p => <DoctorRow key={p.id} item={p} />)}
+          <div className="gg-settings-section-title" style={{ marginTop: 12 }}>Коннекторы</div>
+          {report.connectors.map(c => <DoctorRow key={c.id} item={c} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function Settings({ onClose }: { onClose: () => void }) {
+  const t = useT()
+  const activeProjectPath = useProject(s => s.path)
+  const [tab, setTab] = useState<Tab>('providers')
+
+  // Группы для левой sidebar — повторяет OpenCode Desktop структуру.
+  const TAB_GROUPS: ReadonlyArray<{ title: string; tabs: ReadonlyArray<{ id: Tab; label: string; icon: React.ReactNode }> }> = [
+    { title: t.settings.application, tabs: [
+      { id: 'appearance', label: t.settings.appearance, icon: '🎨' },
+      { id: 'profiles',   label: t.settings.profiles,   icon: '👤' }
+    ] },
+    { title: t.settings.server, tabs: [
+      { id: 'providers',  label: t.settings.providers,  icon: '🔌' },
+      { id: 'models',     label: t.settings.models,     icon: '✨' },
+      { id: 'connectors', label: t.settings.connectors, icon: <IconPlug size={16} /> },
+      { id: 'mcp',        label: 'MCP',                 icon: '⚡' },
+      { id: 'policy',     label: 'Что разрешено',       icon: '🛡' },
+      { id: 'autonomous', label: t.settings.nightMode,  icon: '🌙' },
+      { id: 'memory',     label: t.settings.memory,     icon: '🧠' },
+      { id: 'audit',      label: 'Audit Log',            icon: '📋' }
+    ] }
+  ]
+  const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
+  const [keys, setKeys] = useState<Record<string, string>>({})
+  const [models, setModels] = useState<Record<string, string>>({})
+  const [enabledModels, setEnabledModels] = useState<Set<string>>(new Set())
+  const [saved, setSaved] = useState(false)
+  const [onec, setOneC] = useState({ url: '', user: '', pass: '' })
+  const [autonomous, setAutonomousState] = useState<AutonomousStatus>({
+    enabled: false, intervalMin: 30, lastRunAt: null, lastRunSuggestions: 0, lastRunError: null, nextRunAt: null
+  })
+  const [httpEndpoints, setHttpEndpoints] = useState<Array<{ name: string; base: string; auth: string; paths: string }>>(
+    [{ name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }]
+  )
+  // V3 — российские коннекторы (раздел 5 плана).
+  const [gsheetsJson, setGsheetsJson] = useState('')
+  const [telegramBotToken, setTelegramBotToken] = useState('')
+  const [telegramWhitelist, setTelegramWhitelist] = useState('')
+  const [sshHost, setSshHost] = useState('')
+  const [sshKeyPath, setSshKeyPath] = useState('')
+  const [bitrixWebhook, setBitrixWebhook] = useState('')
+  const [yDirectToken, setYDirectToken] = useState('')
+  const [yDirectLogin, setYDirectLogin] = useState('')
+  const [skillsServerBase, setSkillsServerBase] = useState('')
+  const [claudeOauthToken, setClaudeOauthToken] = useState('')
+  const [yDiskToken, setYDiskToken] = useState('')
+  const [githubToken, setGithubToken] = useState('')
+  const [socialTgChannels, setSocialTgChannels] = useState('')
+  const [socialVkToken, setSocialVkToken] = useState('')
+  const [socialVkGroupId, setSocialVkGroupId] = useState('')
+  const [socialWebhooks, setSocialWebhooks] = useState('')
+  const [costCap, setCostCap] = useState('')
+  const [configuredConnectors, setConfiguredConnectors] = useState<Set<string>>(new Set())
+  const [openConnector, setOpenConnector] = useState<string | null>(null)
+  // Custom OpenAI-compatible: base URL + список моделей через запятую.
+  // Сохраняется в settings.custom_openai_baseurl / custom_openai_models.
+  const [customOpenaiBaseUrl, setCustomOpenaiBaseUrl] = useState('')
+  const [customOpenaiModels, setCustomOpenaiModels] = useState('')
+  const [memories, setMemories] = useState<Memory[]>([])
+  const [memoriesPath, setMemoriesPath] = useState<string | null>(null)
+  // Core memory — MEMORY.md и USER.md
+  const [coreMemoryText, setCoreMemoryText] = useState('')
+  const [coreUserText, setCoreUserText] = useState('')
+  const [coreMemorySaved, setCoreMemorySaved] = useState(false)
+  const [currentLang, setCurrentLang] = useState('en')
+  const { theme, setTheme, squareCorners, setSquareCorners } = useTheme()
+  // Audit log
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
+  const [auditPath, setAuditPath] = useState<string | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      const provider = await window.api.settings.getKey('provider')
+      const valid = ['gemini-api', 'gemini-cli', 'claude', 'grok', 'openai'].includes(provider ?? '') ? (provider as ProviderId) : 'gemini-api'
+      setActiveProvider(valid)
+      const keyVals: Record<string, string> = {}
+      const modelVals: Record<string, string> = {}
+      for (const p of PROVIDERS) {
+        if (p.secretKey) {
+          const v = await window.api.settings.getKey(p.secretKey)
+          if (v) keyVals[p.secretKey] = v
+        }
+        let m = await window.api.settings.getKey(`model_${p.id}`)
+        // Migration: drop saved model values that aren't in the current list
+        // (e.g. gemini-3.5-flash for gemini-cli — alias only works for API)
+        if (m && !p.models.includes(m)) {
+          await window.api.settings.setKey(`model_${p.id}`, p.defaultModel)
+          m = p.defaultModel
+        }
+        modelVals[p.id] = m ?? p.defaultModel
+      }
+      setKeys(keyVals)
+      setModels(modelVals)
+      // 1С connector creds
+      const url = await window.api.settings.getKey('onec_base_url')
+      const user = await window.api.settings.getKey('onec_username')
+      const pass = await window.api.settings.getKey('onec_password')
+      setOneC({ url: url ?? '', user: user ?? '', pass: pass ?? '' })
+      // HTTP endpoints
+      const eps: typeof httpEndpoints = []
+      for (let i = 1; i <= 4; i++) {
+        eps.push({
+          name:  (await window.api.settings.getKey(`http_endpoint_${i}_name`))  ?? '',
+          base:  (await window.api.settings.getKey(`http_endpoint_${i}_base`))  ?? '',
+          auth:  (await window.api.settings.getKey(`http_endpoint_${i}_auth`))  ?? '',
+          paths: (await window.api.settings.getKey(`http_endpoint_${i}_paths`)) ?? ''
+        })
+      }
+      setHttpEndpoints(eps)
+      // Autonomous loop status
+      try {
+        const st = await window.api.autonomous.status()
+        setAutonomousState(st)
+      } catch { /* ignore */ }
+      // V3 коннекторы
+      setGsheetsJson((await window.api.settings.getKey('gsheets_service_account_json')) ?? '')
+      setTelegramBotToken((await window.api.settings.getKey('telegram_bot_token')) ?? '')
+      setTelegramWhitelist((await window.api.settings.getKey('telegram_chat_whitelist')) ?? '')
+      setSshHost((await window.api.settings.getKey('ssh_default_host')) ?? '')
+      setSshKeyPath((await window.api.settings.getKey('ssh_key_path')) ?? '')
+      setBitrixWebhook((await window.api.settings.getKey('bitrix24_webhook_url')) ?? '')
+      setYDirectToken((await window.api.settings.getKey('yandex_direct_token')) ?? '')
+      setYDirectLogin((await window.api.settings.getKey('yandex_direct_login')) ?? '')
+      setSkillsServerBase((await window.api.settings.getKey('skills_server_base')) ?? '')
+      setClaudeOauthToken((await window.api.settings.getKey('claude_code_oauth_token')) ?? '')
+      setYDiskToken((await window.api.settings.getKey('yandex_disk_token')) ?? '')
+      setGithubToken((await window.api.settings.getKey('github_token')) ?? '')
+      setSocialTgChannels((await window.api.settings.getKey('social_publish_telegram_channels')) ?? '')
+      setSocialVkToken((await window.api.settings.getKey('social_publish_vk_token')) ?? '')
+      setSocialVkGroupId((await window.api.settings.getKey('social_publish_vk_group_id')) ?? '')
+      setSocialWebhooks((await window.api.settings.getKey('social_publish_webhooks')) ?? '')
+      setCostCap((await window.api.settings.getKey('cost_cap_usd_per_session')) ?? '')
+      setCustomOpenaiBaseUrl((await window.api.settings.getKey('custom_openai_baseurl')) ?? '')
+      setCustomOpenaiModels((await window.api.settings.getKey('custom_openai_models')) ?? '')
+      setCurrentLang((await window.api.settings.getKey('app_language')) ?? 'en')
+      // Какие модели «включены» в picker'е. Пусто = все.
+      const em = await window.api.settings.getKey('enabled_models')
+      if (em) {
+        try {
+          const arr = JSON.parse(em) as string[]
+          setEnabledModels(Array.isArray(arr) && arr.length > 0 ? new Set(arr) : allModelsSet())
+        } catch {
+          setEnabledModels(allModelsSet())
+        }
+      } else {
+        setEnabledModels(allModelsSet())
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const loadMemories = useCallback(async (path: string) => {
+    try {
+      const list = await window.api.memory.list(path)
+      setMemories(list)
+    } catch { /* ignore */ }
+  }, [])
+
+  // Загружаем память когда открывается вкладка «Память»
+  useEffect(() => {
+    if (tab !== 'memory') return
+    void (async () => {
+      // Приоритет — активный проект из store; fallback на lastOpenedAt
+      let path = activeProjectPath
+      if (!path) {
+        const projects = await window.api.projects.list()
+        if (projects.length === 0) return
+        const sorted = [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+        path = sorted[0].path
+      }
+      setMemoriesPath(path)
+      void loadMemories(path)
+      // Загружаем core memory
+      try {
+        const cm = await window.api.coreMemory.load(path)
+        setCoreMemoryText(cm.memory)
+        setCoreUserText(cm.user)
+      } catch { /* ignore */ }
+    })()
+  }, [tab, activeProjectPath, loadMemories])
+
+  // Загружаем audit log при открытии вкладки
+  useEffect(() => {
+    if (tab !== 'audit') return
+    void (async () => {
+      let path = activeProjectPath
+      if (!path) {
+        const projects = await window.api.projects.list()
+        if (projects.length === 0) return
+        const sorted = [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt)
+        path = sorted[0].path
+      }
+      setAuditPath(path)
+      try {
+        const entries = await window.api.audit.query(path, { limit: 100 })
+        setAuditEntries(entries)
+      } catch { /* ignore */ }
+    })()
+  }, [tab, activeProjectPath])
+
+  // Detect which connectors are configured (for card badges)
+  useEffect(() => {
+    if (tab !== 'connectors') return
+    void Promise.all(CONNECTORS.map(async c => {
+      if (!c.configuredKey) return null
+      const val = await window.api.settings.getKey(c.configuredKey)
+      return val ? c.id : null
+    })).then(results => {
+      setConfiguredConnectors(new Set(results.filter(Boolean) as string[]))
+    })
+  }, [tab])
+
+  async function save() {
+    await window.api.settings.setKey('provider', activeProvider)
+    for (const p of PROVIDERS) {
+      if (p.secretKey && keys[p.secretKey] !== undefined) {
+        await window.api.settings.setKey(p.secretKey, keys[p.secretKey])
+      }
+      if (models[p.id]) {
+        await window.api.settings.setKey(`model_${p.id}`, models[p.id])
+      }
+    }
+    await window.api.settings.setKey('onec_base_url', onec.url)
+    await window.api.settings.setKey('onec_username', onec.user)
+    await window.api.settings.setKey('onec_password', onec.pass)
+    for (let i = 0; i < httpEndpoints.length; i++) {
+      const e = httpEndpoints[i]
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_name`,  e.name)
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_base`,  e.base)
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_auth`,  e.auth)
+      await window.api.settings.setKey(`http_endpoint_${i + 1}_paths`, e.paths)
+    }
+    // V3 — российские коннекторы и server skills
+    await window.api.settings.setKey('gsheets_service_account_json', gsheetsJson)
+    await window.api.settings.setKey('telegram_bot_token', telegramBotToken)
+    await window.api.settings.setKey('telegram_chat_whitelist', telegramWhitelist)
+    await window.api.settings.setKey('ssh_default_host', sshHost)
+    await window.api.settings.setKey('ssh_key_path', sshKeyPath)
+    await window.api.settings.setKey('bitrix24_webhook_url', bitrixWebhook)
+    await window.api.settings.setKey('yandex_direct_token', yDirectToken)
+    await window.api.settings.setKey('yandex_direct_login', yDirectLogin)
+    await window.api.settings.setKey('skills_server_base', skillsServerBase)
+    await window.api.settings.setKey('claude_code_oauth_token', claudeOauthToken)
+    await window.api.settings.setKey('yandex_disk_token', yDiskToken)
+    await window.api.settings.setKey('github_token', githubToken)
+    await window.api.settings.setKey('social_publish_telegram_channels', socialTgChannels)
+    await window.api.settings.setKey('social_publish_vk_token', socialVkToken)
+    await window.api.settings.setKey('social_publish_vk_group_id', socialVkGroupId)
+    await window.api.settings.setKey('social_publish_webhooks', socialWebhooks)
+    await window.api.settings.setKey('cost_cap_usd_per_session', costCap)
+    await window.api.settings.setKey('enabled_models', JSON.stringify([...enabledModels]))
+    await window.api.settings.setKey('custom_openai_baseurl', customOpenaiBaseUrl)
+    await window.api.settings.setKey('custom_openai_models', customOpenaiModels)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+  }
+
+  function renderConnectorForm(id: string): React.ReactNode {
+    switch (id) {
+      case 'claude-oauth': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Long-lived OAuth token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={claudeOauthToken}
+              onChange={e => setClaudeOauthToken(e.target.value)}
+              placeholder="sk-ant-oat01-... (из `claude setup-token` в PowerShell)"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Claude Code v2.1+ в headless режиме (через нашу программу) НЕ использует Max OAuth напрямую — требует
+            long-lived token. Получи: <code>claude setup-token</code> в PowerShell → подтверди в браузере →
+            копируй token сюда. Verstak будет передавать его как env var <code>CLAUDE_CODE_OAUTH_TOKEN</code>
+            при запуске claude. Решает «401 Invalid credentials» при выборе провайдера Claude Code.
+            Хранится зашифрованным через safeStorage. Действителен 1 год.
+          </div>
+        </>
+      )
+      case 'onec': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">1С OData base URL</label>
+            <input
+              className="gg-input"
+              value={onec.url}
+              onChange={e => setOneC(s => ({ ...s, url: e.target.value }))}
+              placeholder="https://1c.example.com/base/odata/standard.odata"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Логин</label>
+            <input
+              className="gg-input"
+              value={onec.user}
+              onChange={e => setOneC(s => ({ ...s, user: e.target.value }))}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Пароль</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={onec.pass}
+              onChange={e => setOneC(s => ({ ...s, pass: e.target.value }))}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Кред хранится зашифрованным в Electron safeStorage. AI может звать
+            tool <code>connector_query</code> с id=<code>onec</code>; пароль
+            никогда не попадает в промпт.
+          </div>
+        </>
+      )
+      case 'http': return (
+        <>
+          {httpEndpoints.map((ep, i) => (
+            <div key={i} className="gg-http-endpoint">
+              <div className="gg-http-endpoint-head">#{i + 1}</div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Имя</label>
+                <input className="gg-input" value={ep.name} placeholder='напр. "github" или "internal-api"'
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                  spellCheck={false} />
+              </div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Base URL</label>
+                <input className="gg-input" value={ep.base} placeholder="https://api.github.com"
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, base: e.target.value } : x))}
+                  spellCheck={false} />
+              </div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Authorization</label>
+                <input className="gg-input" type="password" value={ep.auth} placeholder='напр. "Bearer ghp_…"'
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, auth: e.target.value } : x))}
+                  autoComplete="new-password" />
+              </div>
+              <div className="gg-settings-row">
+                <label className="gg-settings-label">Allow-paths</label>
+                <input className="gg-input" value={ep.paths} placeholder="/repos,/user (пусто = всё под base)"
+                  onChange={e => setHttpEndpoints(arr => arr.map((x, j) => j === i ? { ...x, paths: e.target.value } : x))}
+                  spellCheck={false} />
+              </div>
+            </div>
+          ))}
+          <div className="gg-settings-hint">
+            AI вызывает <code>connector_query</code> с <code>id="http"</code>,
+            <code>endpoint=&lt;имя&gt;</code> и path/method/query/body/headers.
+            Auth-заголовок подставляется из настроек, AI его не видит.
+            Allow-paths ограничивает к каким путям эндпоинта можно обращаться.
+          </div>
+        </>
+      )
+      case 'gsheets': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Service Account JSON</label>
+            <textarea
+              className="gg-input"
+              value={gsheetsJson}
+              onChange={e => setGsheetsJson(e.target.value)}
+              placeholder='{"type": "service_account", "client_email": "...", "private_key": "-----BEGIN PRIVATE KEY-----\\n...", ...}'
+              rows={5}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            JSON service account (как в <code>/opt/los/creds.json</code>). Шифруется через safeStorage.
+            AI вызывает <code>connector_query</code> с <code>id="gsheets"</code> и <code>op="read_as_records"</code> /
+            <code>"update_row"</code> / etc. См. electron/connectors/gsheets.ts.
+          </div>
+        </>
+      )
+      case 'telegram': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Bot token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={telegramBotToken}
+              onChange={e => setTelegramBotToken(e.target.value)}
+              placeholder="1234567890:AAH... (от @BotFather)"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Chat whitelist (JSON)</label>
+            <input
+              className="gg-input"
+              value={telegramWhitelist}
+              onChange={e => setTelegramWhitelist(e.target.value)}
+              placeholder='["-1003242936373", "@private_chat"]'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            JSON-массив chat_id куда боту разрешено отправлять. Пустая строка = всем (только dev).
+            Rate limit 20 send/min на chat_id вшит в коннектор. Read истории — через SSH к Telethon скрипту.
+          </div>
+        </>
+      )
+      case 'ssh': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Default host</label>
+            <input
+              className="gg-input"
+              value={sshHost}
+              onChange={e => setSshHost(e.target.value)}
+              placeholder="user@server.example.com или alias из ~/.ssh/config"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Path к private key</label>
+            <input
+              className="gg-input"
+              value={sshKeyPath}
+              onChange={e => setSshKeyPath(e.target.value)}
+              placeholder="~/.ssh/id_ed25519 (или полный путь к приватному ключу)"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Whitelist: только default host разрешён для запросов. Команды денилист:
+            rm -rf системных корней, mkfs, dd на /dev, passwd, sudo su, systemctl stop, и т.п.
+            Через connector_query с <code>id="ssh"</code> и <code>op="run_remote"</code>.
+          </div>
+        </>
+      )
+      case 'bitrix': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Incoming webhook URL</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={bitrixWebhook}
+              onChange={e => setBitrixWebhook(e.target.value)}
+              placeholder="https://your-portal.bitrix24.ru/rest/USER_ID/TOKEN/"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Создать в Битрикс24: Разработчикам → Другое → Входящий вебхук. Полный URL с токеном.
+            Denied methods: *.delete (crm.deal/lead/contact/company/user). Allowed prefixes: crm.*, tasks.*, user.*.
+          </div>
+        </>
+      )
+      case 'ydirect': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">OAuth token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={yDirectToken}
+              onChange={e => setYDirectToken(e.target.value)}
+              placeholder="Получить: oauth.yandex.ru, scope: direct:api"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Client-Login (опц.)</label>
+            <input
+              className="gg-input"
+              value={yDirectLogin}
+              onChange={e => setYDirectLogin(e.target.value)}
+              placeholder="Login клиента — для агентских аккаунтов"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Reports API асинхронный — connector polls до 30s. Если отчёт большой,
+            возвращается <code>processing: true</code>, повторяй запрос.
+          </div>
+        </>
+      )
+      case 'ydisk': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">OAuth token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={yDiskToken}
+              onChange={e => setYDiskToken(e.target.value)}
+              placeholder="oauth.yandex.ru со scope cloud_api:disk.write"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Используется агентом для шеринга артефактов с клиентами:
+            upload_file → get_public_url → отправка ссылки в TG.
+            Загрузка идёт в <code>/Verstak/{`{дата}`}/</code> чтобы не засорять корень Диска.
+          </div>
+        </>
+      )
+      case 'skills-server': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Skills server base URL</label>
+            <input
+              className="gg-input"
+              value={skillsServerBase}
+              onChange={e => setSkillsServerBase(e.target.value)}
+              placeholder="https://your-skills-server.example.com (или пусто для built-in only)"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Сервер должен предоставлять <code>GET /api/skills</code> возвращающий
+            <code>{`{skills: [{id, raw, sourceRef}]}`}</code>. Если недоступен — используются built-in
+            (code-review / git-summary / explain-code) + локальные из ~/.verstak/skills/.
+          </div>
+        </>
+      )
+      case 'github': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Personal Access Token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={githubToken}
+              onChange={e => setGithubToken(e.target.value)}
+              placeholder="ghp_... (Settings → Developer settings → Personal access tokens)"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-hint">
+            Создать: GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens.
+            Нужны scopes: <code>repo</code>, <code>read:org</code>. AI вызывает <code>connector_query</code> с{' '}
+            <code>id="github"</code> и <code>op="list_repos"</code> / <code>"list_issues"</code> / etc.
+            Хранится зашифрованным через safeStorage.
+          </div>
+        </>
+      )
+      case 'social-publish': return (
+        <>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Telegram-каналы (JSON)</label>
+            <input
+              className="gg-input"
+              value={socialTgChannels}
+              onChange={e => setSocialTgChannels(e.target.value)}
+              placeholder='["-1001234567890", "@my_channel"]'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
+            Переиспользует Bot token из коннектора Telegram (telegram_bot_token). Список chat_id куда постить.
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">VK token</label>
+            <input
+              className="gg-input"
+              type="password"
+              value={socialVkToken}
+              onChange={e => setSocialVkToken(e.target.value)}
+              placeholder="User token со scope wall (vk.com/dev, oauth.vk.com)"
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">VK group ID</label>
+            <input
+              className="gg-input"
+              value={socialVkGroupId}
+              onChange={e => setSocialVkGroupId(e.target.value)}
+              placeholder="Числовой ID группы (без минуса), напр. 123456789"
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Webhooks (JSON)</label>
+            <input
+              className="gg-input"
+              value={socialWebhooks}
+              onChange={e => setSocialWebhooks(e.target.value)}
+              placeholder='["https://hooks.example.com/abc", "https://n8n.example.com/webhook/xyz"]'
+              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              spellCheck={false}
+            />
+          </div>
+          <div className="gg-settings-hint">
+            AI вызывает <code>connector_query</code> с <code>id="social-publish"</code> и
+            <code>op="publish_text"</code>, <code>text="..."</code>.
+            Опционально <code>platforms: ["telegram", "vk", "webhook"]</code> — если не передан, постит во всё настроенное.
+          </div>
+        </>
+      )
+      default: return null
+    }
+  }
+
+  return (
+    <div className="gg-modal-backdrop" onClick={onClose}>
+      <div className="gg-modal gg-modal-large" onClick={e => e.stopPropagation()}>
+        <div className="gg-modal-header">
+          <div className="gg-modal-title">{t.settings.title}</div>
+          <button className="gg-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="gg-settings-shell">
+          <aside className="gg-settings-nav" role="tablist" aria-label="Разделы настроек">
+            {TAB_GROUPS.map(g => (
+              <div key={g.title} className="gg-settings-nav-group">
+                <div className="gg-settings-nav-title">{g.title}</div>
+                {g.tabs.map(t => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === t.id}
+                    className={`gg-settings-nav-item ${tab === t.id ? 'is-active' : ''}`}
+                    onClick={() => setTab(t.id)}
+                  >
+                    <span className="gg-settings-nav-icon" aria-hidden>{t.icon}</span>
+                    <span>{t.label}</span>
+                  </button>
+                ))}
+              </div>
+            ))}
+          </aside>
+
+          <div className="gg-settings-content">
+
+        {tab === 'providers' && (
+        <>
+        <DoctorPanel />
+        <ProvidersPage
+          providers={PROVIDERS}
+          keys={keys}
+          setKeys={setKeys}
+          activeProvider={activeProvider}
+          setActiveProvider={setActiveProvider}
+          customOpenaiBaseUrl={customOpenaiBaseUrl}
+          setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
+          customOpenaiModels={customOpenaiModels}
+          setCustomOpenaiModels={setCustomOpenaiModels}
+        />
+        </>
+        )}
+
+        {tab === 'models' && (
+        <ModelsPage
+          providers={PROVIDERS}
+          enabledModels={enabledModels}
+          setEnabledModels={setEnabledModels}
+          models={models}
+          setModels={setModels}
+          activeProvider={activeProvider}
+          setActiveProvider={setActiveProvider}
+          keys={keys}
+        />
+        )}
+
+        {tab === 'connectors' && (
+        <div className="gg-settings-extra">
+          {/* Cost cap — not a connector, stays at top */}
+          <div className="gg-connector-cost-cap">
+            <div className="gg-settings-section-title">💰 Hard cost cap (auto-stop)</div>
+            <div className="gg-settings-row">
+              <label className="gg-settings-label">Лимит $/сессия</label>
+              <input
+                className="gg-input"
+                type="text"
+                value={costCap}
+                onChange={e => setCostCap(e.target.value.replace(/[^\d.]/g, ''))}
+                placeholder="Например: 5 (max $5 за сессию). Пусто = guard выключен."
+                style={{ maxWidth: 200 }}
+              />
+            </div>
+            <div className="gg-settings-hint">
+              Если AI-сессия (API-провайдер) превысит этот лимит — auto-stop с
+              сообщением «лимит израсходован». CLI-провайдеры (подписки) идут
+              мимо лимита — они $0. Лимит на ОДНУ сессию, не суммарно за день.
+              Стандартный chat = $0.05-0.50. Длинный agent loop с большим
+              проектом = $2-10. Безопасный default: 5.
+            </div>
+          </div>
+
+          {/* Card grid — Codex-style marketplace */}
+          <div className="gg-connector-grid">
+            {CONNECTORS.map(c => {
+              const configured = configuredConnectors.has(c.id)
+              return (
+                <button
+                  key={c.id}
+                  className={`gg-connector-card ${configured ? 'is-connected' : ''} ${openConnector === c.id ? 'is-open' : ''}`}
+                  onClick={() => setOpenConnector(openConnector === c.id ? null : c.id)}
+                >
+                  <div className="gg-connector-card-icon"><c.icon size={32} /></div>
+                  <div className="gg-connector-card-body">
+                    <div className="gg-connector-card-name">{c.name}</div>
+                    <div className="gg-connector-card-desc">{c.description}</div>
+                  </div>
+                  <div className="gg-connector-card-status">
+                    {configured ? <span className="gg-badge-connected">&#10003;</span> : <span className="gg-badge-add">+</span>}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Expanded settings panel below the grid */}
+          {openConnector && (
+            <div className="gg-connector-detail">
+              <div className="gg-connector-detail-header">
+                {(() => { const def = CONNECTORS.find(c => c.id === openConnector); return def ? <><def.icon size={20} /> {def.name}</> : null })()}
+                <button className="gg-connector-detail-close" onClick={() => setOpenConnector(null)}>×</button>
+              </div>
+              <div className="gg-connector-detail-body">
+                {renderConnectorForm(openConnector)}
+              </div>
+            </div>
+          )}
+        </div>
+        )}
+
+        {tab === 'mcp' && (
+          <McpTab />
+        )}
+
+        {tab === 'policy' && (
+          <PolicyTab />
+        )}
+
+        {tab === 'autonomous' && (
+        <div className="gg-settings-extra">
+          <div className="gg-settings-section-title">🌙 Ночной режим — autonomous improvement loop</div>
+          <div className="gg-settings-hint" style={{ marginBottom: 14 }}>
+            Фоновый цикл который без участия пользователя читает журнал и project_map активного проекта, отправляет AI задачу «предложи 3 улучшения с обоснованием из истории», парсит ответ и пишет предложения в Journal как заметки. Утром открываешь Journal → видишь N предложений за ночь. <strong>Не делает write_file / run_command автоматически</strong> — только генерирует идеи.
+          </div>
+
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Статус</label>
+            <div style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>
+              {autonomous.enabled
+                ? <span style={{ color: 'var(--success, #4ade80)' }}>● Активен · каждые {autonomous.intervalMin} мин</span>
+                : <span style={{ color: 'var(--text-tertiary)' }}>○ Остановлен</span>}
+            </div>
+          </div>
+
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Интервал (мин)</label>
+            <input
+              className="gg-input"
+              type="number"
+              min={5}
+              max={240}
+              value={autonomous.intervalMin}
+              onChange={e => setAutonomousState(s => ({ ...s, intervalMin: parseInt(e.target.value, 10) || 30 }))}
+              style={{ maxWidth: 100 }}
+            />
+          </div>
+
+          <div className="gg-settings-row">
+            <label className="gg-settings-label">Управление</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {!autonomous.enabled ? (
+                <button
+                  className="gg-btn gg-btn-primary"
+                  onClick={async () => {
+                    const st = await window.api.autonomous.start(autonomous.intervalMin)
+                    setAutonomousState(st)
+                  }}
+                >▶ Запустить</button>
+              ) : (
+                <button
+                  className="gg-btn gg-btn-danger"
+                  onClick={async () => {
+                    const st = await window.api.autonomous.stop()
+                    setAutonomousState(st)
+                  }}
+                >■ Остановить</button>
+              )}
+              <button
+                className="gg-btn gg-btn-ghost"
+                onClick={async () => {
+                  const st = await window.api.autonomous.runOnce()
+                  setAutonomousState(st)
+                }}
+              >Запустить цикл прямо сейчас</button>
+            </div>
+          </div>
+
+          {autonomous.lastRunAt && (
+            <div className="gg-settings-row">
+              <label className="gg-settings-label">Последний запуск</label>
+              <div style={{ flex: 1, fontSize: 'var(--text-sm)' }}>
+                {new Date(autonomous.lastRunAt).toLocaleString()}
+                {' · '}
+                {autonomous.lastRunError
+                  ? <span style={{ color: 'var(--error)' }}>ошибка: {autonomous.lastRunError}</span>
+                  : <span>предложений: {autonomous.lastRunSuggestions}</span>}
+              </div>
+            </div>
+          )}
+
+          {autonomous.nextRunAt && autonomous.enabled && (
+            <div className="gg-settings-row">
+              <label className="gg-settings-label">Следующий</label>
+              <div style={{ flex: 1, fontSize: 'var(--text-sm)' }}>
+                {new Date(autonomous.nextRunAt).toLocaleString()}
+              </div>
+            </div>
+          )}
+
+          <div className="gg-settings-hint" style={{ marginTop: 14 }}>
+            <strong>Требования:</strong> провайдер должен быть API-типа с ключом (Gemini / Claude / Grok / ChatGPT API).
+            CLI-провайдеры (Claude Code, Codex и т.д.) не годятся — нет неинтерактивного канала.
+            Активный проект должен быть открыт.
+          </div>
+        </div>
+        )}
+
+        {tab === 'profiles' && (<ProfilesTab />)}
+
+        {tab === 'memory' && (
+        <div className="gg-settings-extra">
+          <div className="gg-settings-section-title">🧠 Память агента</div>
+          {memoriesPath && (
+            <div className="gg-settings-hint" style={{ marginBottom: 12 }}>
+              Проект: <code>{memoriesPath}</code>
+            </div>
+          )}
+
+          {/* ── Core Memory ── */}
+          <div className="gg-core-memory-section">
+            <div className="gg-core-memory-header">
+              Core Memory
+              <span className="gg-settings-hint" style={{ marginLeft: 8, display: 'inline', fontStyle: 'normal' }}>
+                (всегда в контексте агента)
+              </span>
+            </div>
+
+            <label className="gg-core-memory-label">О проекте (MEMORY.md)</label>
+            <div className="gg-core-memory-field">
+              <textarea
+                className="gg-input gg-core-memory-textarea"
+                value={coreMemoryText}
+                onChange={e => setCoreMemoryText(e.target.value)}
+                maxLength={2000}
+                rows={6}
+                placeholder="Агент заполнит автоматически или напиши сам: конвенции, архитектура, важные решения..."
+                spellCheck={false}
+              />
+              <span className={`gg-char-count ${coreMemoryText.length > 1900 ? 'is-warn' : ''}`}>
+                {coreMemoryText.length}/2000
+              </span>
+            </div>
+
+            <label className="gg-core-memory-label">О пользователе (USER.md)</label>
+            <div className="gg-core-memory-field">
+              <textarea
+                className="gg-input gg-core-memory-textarea"
+                value={coreUserText}
+                onChange={e => setCoreUserText(e.target.value)}
+                maxLength={1500}
+                rows={4}
+                placeholder="Предпочтения, стиль общения, правила взаимодействия..."
+                spellCheck={false}
+              />
+              <span className={`gg-char-count ${coreUserText.length > 1400 ? 'is-warn' : ''}`}>
+                {coreUserText.length}/1500
+              </span>
+            </div>
+
+            <div className="gg-core-memory-actions">
+              <button
+                type="button"
+                className="gg-btn gg-btn-primary"
+                disabled={!memoriesPath}
+                onClick={async () => {
+                  if (!memoriesPath) return
+                  await window.api.coreMemory.save(memoriesPath, 'memory', coreMemoryText)
+                  await window.api.coreMemory.save(memoriesPath, 'user', coreUserText)
+                  setCoreMemorySaved(true)
+                  setTimeout(() => setCoreMemorySaved(false), 1500)
+                }}
+              >
+                {coreMemorySaved ? '✓ Сохранено' : 'Сохранить Core Memory'}
+              </button>
+            </div>
+          </div>
+
+          <div className="gg-settings-section-title" style={{ marginTop: 20 }}>Архивная память</div>
+          {memories.length === 0 ? (
+            <div className="gg-text-tertiary" style={{ padding: '18px 0', fontSize: 'var(--text-sm)' }}>
+              Нет сохранённых воспоминаний для этого проекта
+            </div>
+          ) : (
+            <>
+              <div className="gg-memory-list">
+                {memories.map(m => (
+                  <div key={m.id} className="gg-memory-row">
+                    <div className="gg-memory-row-main">
+                      <span className="gg-memory-type-badge">{m.type}</span>
+                      <span className="gg-memory-content">{m.content}</span>
+                    </div>
+                    {m.tags.length > 0 && (
+                      <div className="gg-memory-tags">
+                        {m.tags.map(t => <span key={t} className="gg-memory-tag">{t}</span>)}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="gg-btn gg-btn-ghost gg-memory-delete"
+                      title="Удалить"
+                      onClick={async () => {
+                        await window.api.memory.delete(m.id)
+                        if (memoriesPath) void loadMemories(memoriesPath)
+                      }}
+                    >🗑</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <button
+                  type="button"
+                  className="gg-btn gg-btn-danger"
+                  onClick={async () => {
+                    if (!memoriesPath) return
+                    for (const m of memories) {
+                      await window.api.memory.delete(m.id)
+                    }
+                    setMemories([])
+                  }}
+                >Очистить всё</button>
+              </div>
+            </>
+          )}
+        </div>
+        )}
+
+        {tab === 'appearance' && (
+        <div className="gg-settings-extra">
+          <div className="gg-settings-section-title">Тема оформления</div>
+          <div className="gg-theme-grid" role="group" style={{ marginBottom: 12 }}>
+            {THEMES.map(meta => (
+              <button
+                key={meta.id}
+                type="button"
+                className={`gg-theme-card ${theme === meta.id ? 'is-active' : ''}`}
+                onClick={() => void setTheme(meta.id)}
+                aria-pressed={theme === meta.id}
+                title={meta.label}
+              >
+                <span className="gg-theme-swatch" aria-hidden style={{ background: meta.swatch[0] }}>
+                  <span style={{ background: meta.swatch[1] }} />
+                  <span style={{ background: meta.swatch[2] }} />
+                </span>
+                <span className="gg-theme-name">{meta.label}</span>
+              </button>
+            ))}
+          </div>
+          <label className="gg-theme-square" style={{ marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={squareCorners}
+              onChange={(e) => void setSquareCorners(e.target.checked)}
+            />
+            <span>Прямые углы (без скруглений)</span>
+          </label>
+          <div className="gg-settings-hint">
+            Тема применяется мгновенно. Ширина боковой панели запоминается автоматически — потяни за её правый край.
+          </div>
+          <div className="gg-settings-row" style={{ marginTop: 16 }}>
+            <label className="gg-settings-label">{t.settings.language}</label>
+            <select
+              className="gg-input"
+              style={{ maxWidth: 200 }}
+              value={currentLang}
+              onChange={async (e) => {
+                const lang = e.target.value
+                setCurrentLang(lang)
+                await window.api.settings.setKey('app_language', lang)
+                window.location.reload()
+              }}
+            >
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+            </select>
+          </div>
+        </div>
+        )}
+
+        {tab === 'audit' && (
+        <div className="gg-settings-extra">
+          <div className="gg-settings-section-title">📋 Audit Log</div>
+          {auditPath && (
+            <div className="gg-settings-hint" style={{ marginBottom: 12 }}>
+              Проект: <code>{auditPath}</code>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button
+              type="button"
+              className="gg-btn gg-btn-primary"
+              disabled={!auditPath}
+              onClick={async () => {
+                if (!auditPath) return
+                try {
+                  const csv = await window.api.audit.export(auditPath)
+                  const blob = new Blob([csv], { type: 'text/csv' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `audit-${Date.now()}.csv`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                } catch { /* ignore */ }
+              }}
+            >
+              ⬇ Export CSV
+            </button>
+            <button
+              type="button"
+              className="gg-btn gg-btn-ghost"
+              disabled={!auditPath}
+              onClick={async () => {
+                if (!auditPath) return
+                if (!window.confirm('Очистить весь audit log для этого проекта?')) return
+                try {
+                  await window.api.audit.clear(auditPath)
+                  setAuditEntries([])
+                } catch { /* ignore */ }
+              }}
+            >
+              🗑 Clear
+            </button>
+          </div>
+          {auditEntries.length === 0 ? (
+            <div className="gg-settings-hint">Нет записей. Audit log заполняется по мере работы агента.</div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--gg-border)' }}>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Time</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Action</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Provider</th>
+                    <th style={{ textAlign: 'left', padding: '4px 8px' }}>Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditEntries.map(e => (
+                    <tr key={e.id} style={{ borderBottom: '1px solid var(--gg-border-subtle, #333)' }}>
+                      <td style={{ padding: '4px 8px', whiteSpace: 'nowrap', color: 'var(--gg-text-muted)' }}>
+                        {new Date(e.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          padding: '1px 6px', borderRadius: 4, fontSize: 11,
+                          background: e.action === 'error' ? 'var(--gg-error-bg, #3a1a1a)' : 'var(--gg-tag-bg, #1a2a3a)',
+                          color: e.action === 'error' ? 'var(--gg-error, #f87171)' : 'var(--gg-accent, #60a5fa)'
+                        }}>
+                          {e.action}
+                        </span>
+                      </td>
+                      <td style={{ padding: '4px 8px', color: 'var(--gg-text-muted)', whiteSpace: 'nowrap' }}>
+                        {e.providerId ?? '—'}
+                      </td>
+                      <td style={{ padding: '4px 8px', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {e.detail}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        )}
+
+          </div>{/* /gg-settings-content */}
+        </div>{/* /gg-settings-shell */}
+
+        <div className="gg-modal-footer">
+          <button className="gg-btn gg-btn-ghost" onClick={onClose}>{t.common.close}</button>
+          <button className="gg-btn gg-btn-primary" onClick={save}>
+            {saved ? t.settings.saved : t.settings.save}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ProvidersPage — OpenCode Desktop-style: «Подключённые» (с бейджем + Отключить)
+// + «Доступные» (карточки с кнопкой Подключить, раскрывается inline-форма с
+// ключом / hint'ом). Источник провайдеров — массив PROVIDERS (тот же что в
+// Models). «Подключение» = задание API-ключа; для CLI-провайдеров «подключение»
+// = установка CLI вне приложения, мы только подтверждаем галкой.
+// ════════════════════════════════════════════════════════════════════════════
+
+interface ProvidersPageProps {
+  providers: ProviderConfig[]
+  keys: Record<string, string>
+  setKeys: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  activeProvider: ProviderId
+  setActiveProvider: (id: ProviderId) => void
+  // Custom OpenAI-compatible настройки. Уникальный провайдер 'custom-openai'
+  // имеет ещё 2 поля: baseUrl и список моделей через запятую.
+  customOpenaiBaseUrl: string
+  setCustomOpenaiBaseUrl: (v: string) => void
+  customOpenaiModels: string
+  setCustomOpenaiModels: (v: string) => void
+}
+
+function statusBadge(
+  status: ConnectionStatus,
+  transport: 'API' | 'CLI',
+  providerId?: ProviderId,
+  secretKey?: string | null,
+  cliState?: { installed: boolean; loggedIn: boolean }
+): { label: string; tone: 'ready' | 'cli' | 'missing'; title?: string } {
+  if (transport === 'CLI') {
+    if (!cliState) return { label: 'Среда', tone: 'cli', title: 'Загружаю статус…' }
+    if (!cliState.installed) return { label: 'Не установлен', tone: 'missing', title: 'Бинарь CLI не найден в PATH' }
+    if (cliState.loggedIn)   return { label: 'Залогинен', tone: 'ready', title: 'OAuth/API key найден локально' }
+    return { label: 'Не залогинен', tone: 'missing', title: 'CLI установлен но credentials не найдены — нажми «Перелогиниться»' }
+  }
+  if (providerId === 'custom-openai') return { label: 'Custom URL', tone: 'ready' }
+  if (!secretKey) return { label: 'Локально', tone: 'cli' } // Ollama-подобные
+  if (status === 'ready')  return { label: 'API ключ', tone: 'ready' }
+  return { label: 'Нет ключа', tone: 'missing' }
+}
+
+type CliId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
+type CliStatusMap = Record<CliId, { installed: boolean; loggedIn: boolean; credPath?: string }>
+
+function ProvidersPage(props: ProvidersPageProps) {
+  const { providers, keys, setKeys, activeProvider, setActiveProvider,
+          customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
+          customOpenaiModels, setCustomOpenaiModels } = props
+  const [expanded, setExpanded] = useState<ProviderId | null>(null)
+  // toast — короткое сообщение о результате logout/relogin. null = ничего.
+  const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [busy, setBusy] = useState<ProviderId | null>(null)
+  // CLI статус: загружается при открытии страницы И после logout/relogin.
+  // null = ещё не загружено (показываем "Среда" по дефолту).
+  const [cliStatus, setCliStatus] = useState<CliStatusMap | null>(null)
+  // Обнаруженные CLI-инструменты на компьютере пользователя.
+  const [detectedClis, setDetectedClis] = useState<DetectedCli[] | null>(null)
+
+  async function loadCliStatus() {
+    try {
+      const s = await window.api.cliAuth.statusAll()
+      setCliStatus(s)
+    } catch { /* не критично — оставим null, бейдж покажет fallback */ }
+  }
+  useEffect(() => {
+    void loadCliStatus()
+    window.api.cli.detect().then(setDetectedClis).catch(() => {})
+  }, [])
+
+  // «Подключён» = доступен для отправки запросов:
+  //  - CLI: всегда (бинарь либо есть либо нет — реальный коннект сделает provider при send)
+  //  - Локальный (без secretKey, НЕ CLI): Ollama и подобное — всегда доступен на localhost
+  //  - custom-openai: главное чтобы baseUrl был задан, ключ опционален
+  //  - Обычные API: должен быть введён secretKey
+  function isConnected(p: ProviderConfig): boolean {
+    if (p.transport === 'CLI') return true
+    if (p.id === 'custom-openai') return customOpenaiBaseUrl.trim().length > 0
+    if (!p.secretKey) return true
+    return Boolean(keys[p.secretKey])
+  }
+  const connected = providers.filter(p => isConnected(p))
+  const available = providers.filter(p => p.transport === 'API' && !isConnected(p))
+
+  function showToast(kind: 'ok' | 'err', text: string) {
+    setToast({ kind, text })
+    setTimeout(() => setToast(null), 5000)
+  }
+
+  async function disconnect(p: ProviderConfig) {
+    if (p.transport === 'CLI') {
+      // CLI: реальный logout через child_process + удаление credentials.
+      setBusy(p.id)
+      try {
+        const res = await window.api.cliAuth.logout(p.id)
+        if (res.ok) {
+          const fileCount = res.removedFiles.length
+          showToast('ok',
+            res.method === 'logout-cmd' ? `${p.name}: отключено через \`${p.id.split('-')[0]} logout\`` :
+            res.method === 'both' ? `${p.name}: logout + удалено ${fileCount} файл(ов) credentials` :
+            `${p.name}: удалено ${fileCount} файл(ов) credentials`
+          )
+        } else {
+          showToast('err', res.message ?? `${p.name}: не удалось отключить`)
+        }
+      } catch (err) {
+        showToast('err', `${p.name}: ошибка — ${(err as Error).message}`)
+      } finally {
+        setBusy(null)
+        void loadCliStatus() // обновить бейдж после logout
+      }
+      return
+    }
+    // API: просто чистим ключ в state (save → SafeStorage)
+    if (p.secretKey) {
+      setKeys(k => {
+        const next = { ...k }
+        delete next[p.secretKey!]
+        return next
+      })
+      showToast('ok', `${p.name}: ключ очищен. Не забудь нажать «Сохранить» внизу.`)
+    }
+    if (activeProvider === p.id) {
+      const fallback = providers.find(x => x.id !== p.id && (x.transport === 'CLI' || (x.secretKey && keys[x.secretKey])))
+      if (fallback) setActiveProvider(fallback.id)
+    }
+  }
+
+  async function relogin(p: ProviderConfig) {
+    if (p.transport !== 'CLI') return
+    setBusy(p.id)
+    try {
+      const res = await window.api.cliAuth.relogin(p.id)
+      if (res.ok) {
+        showToast('ok', `${p.name}: открыл терминал для входа. Пройди OAuth в новом окне → вернись сюда.`)
+      } else {
+        showToast('err', res.message ?? `${p.name}: не удалось открыть терминал`)
+      }
+    } catch (err) {
+      showToast('err', `${p.name}: ошибка — ${(err as Error).message}`)
+    } finally {
+      setBusy(null)
+      // После relogin'а проверим статус — но не сразу, OAuth требует времени.
+      // Шлём через 8 сек когда пользователь успел пройти браузер-flow.
+      setTimeout(() => void loadCliStatus(), 8000)
+    }
+  }
+
+  // Онбординг-баннер для нового пользователя без API ключей.
+  // Если нет НИ ОДНОГО заданного API ключа среди API-провайдеров — показываем
+  // явный hint что делать. CLI-провайдеры в учёт не идут: они через подписку
+  // и могут быть «среда»/«залогинен», но без API-ключей агент в облачные
+  // модели стрелять не сможет.
+  const hasAnyApiKey = providers.some(p =>
+    p.transport === 'API' && p.secretKey != null && Boolean(keys[p.secretKey])
+  )
+  // Custom-openai считаем «настроенным» если baseUrl задан, даже без ключа.
+  const hasCustomConfigured = customOpenaiBaseUrl.trim().length > 0
+  const showOnboardingHint = !hasAnyApiKey && !hasCustomConfigured
+
+  return (
+    <div className="gg-settings-extra gg-providers-page">
+      <h2 className="gg-settings-page-title">Провайдеры</h2>
+
+      {showOnboardingHint && (
+        <div className="gg-prov-onboarding" role="alert">
+          <div className="gg-prov-onboarding-icon" aria-hidden>👋</div>
+          <div className="gg-prov-onboarding-body">
+            <div className="gg-prov-onboarding-title">Добавьте хотя бы один API ключ чтобы начать</div>
+            <div className="gg-prov-onboarding-text">
+              Рекомендуем — <strong>Gemini API</strong> (есть бесплатный tier на
+              {' '}<a href="https://aistudio.google.com" target="_blank" rel="noreferrer">aistudio.google.com</a>)
+              или <strong>Claude API</strong> ({' '}<a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>).
+              Найди карточку ниже → «+ Подключить» → вставь ключ → «Сохранить».
+              CLI-провайдеры (Claude Code, Gemini CLI и т.п.) — на твоей подписке, отдельная история.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className={`gg-prov-toast is-${toast.kind}`} role="status">
+          {toast.text}
+        </div>
+      )}
+
+      <div className="gg-settings-section-title" style={{ marginTop: 8 }}>Подключённые провайдеры</div>
+      <div className="gg-prov-list">
+        {connected.length === 0 && (
+          <div className="gg-text-tertiary" style={{ padding: 14, fontSize: 'var(--text-sm)' }}>
+            Пока нет подключённых. Внизу — доступные.
+          </div>
+        )}
+        {connected.map(p => {
+          const status = connectionStatus(p.id, p.secretKey, keys)
+          const cliState = (p.transport === 'CLI' && cliStatus)
+            ? cliStatus[p.id as CliId]
+            : undefined
+          const badge = statusBadge(status, p.transport, p.id, p.secretKey, cliState)
+          return (
+            <div key={p.id} className="gg-prov-card">
+              <div className="gg-prov-card-main">
+                <div className="gg-prov-card-name">
+                  {p.name}
+                  <span className={`gg-prov-badge is-${badge.tone}`} title={badge.title}>{badge.label}</span>
+                </div>
+                <div className="gg-prov-card-desc">{p.description}</div>
+              </div>
+              <div className="gg-prov-card-actions">
+                {p.transport === 'API' && (
+                  <button
+                    type="button"
+                    className="gg-btn gg-btn-ghost"
+                    onClick={() => setExpanded(expanded === p.id ? null : p.id)}
+                  >{expanded === p.id ? 'Скрыть' : 'Изменить ключ'}</button>
+                )}
+                {p.transport === 'CLI' && (
+                  <button
+                    type="button"
+                    className="gg-btn gg-btn-ghost"
+                    onClick={() => void relogin(p)}
+                    disabled={busy === p.id}
+                    title="Открыть терминал и пройти OAuth по новой"
+                  >{busy === p.id ? '…' : 'Перелогиниться'}</button>
+                )}
+                <button
+                  type="button"
+                  className="gg-btn gg-btn-ghost"
+                  onClick={() => void disconnect(p)}
+                  disabled={busy === p.id}
+                  title={p.transport === 'CLI' ? 'Выйти из подписки: бежим `<cli> logout` + удаляем credentials-файлы' : 'Очистить API ключ из настроек'}
+                >{busy === p.id ? '…' : 'Отключить'}</button>
+              </div>
+              {expanded === p.id && (
+                <ProviderExpandForm
+                  p={p}
+                  keys={keys}
+                  setKeys={setKeys}
+                  customOpenaiBaseUrl={customOpenaiBaseUrl}
+                  setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
+                  customOpenaiModels={customOpenaiModels}
+                  setCustomOpenaiModels={setCustomOpenaiModels}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Доступные провайдеры</div>
+      <div className="gg-prov-list">
+        {available.length === 0 && (
+          <div className="gg-text-tertiary" style={{ padding: 14, fontSize: 'var(--text-sm)' }}>
+            Все API-провайдеры подключены.
+          </div>
+        )}
+        {available.map(p => (
+          <div key={p.id} className="gg-prov-card">
+            <div className="gg-prov-card-main">
+              <div className="gg-prov-card-name">{p.name}<span className="gg-prov-badge is-recommended">Рекомендуемый</span></div>
+              <div className="gg-prov-card-desc">{p.description}</div>
+            </div>
+            <div className="gg-prov-card-actions">
+              <button
+                type="button"
+                className="gg-btn gg-btn-primary"
+                onClick={() => setExpanded(p.id)}
+              >+ Подключить</button>
+            </div>
+            {expanded === p.id && (
+              <ProviderExpandForm
+                p={p}
+                keys={keys}
+                setKeys={setKeys}
+                customOpenaiBaseUrl={customOpenaiBaseUrl}
+                setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
+                customOpenaiModels={customOpenaiModels}
+                setCustomOpenaiModels={setCustomOpenaiModels}
+                hint="Нажми «Сохранить» внизу — провайдер появится в подключённых."
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="gg-settings-hint" style={{ marginTop: 18 }}>
+        CLI-провайдеры (Gemini CLI / Claude Code / Grok Build / Codex) подключаются установкой соответствующего CLI вне приложения и логином через подписку. После этого они появляются как «Среда».
+      </div>
+
+      {detectedClis !== null && detectedClis.length > 0 && (
+        <div className="gg-prov-detected">
+          <div className="gg-settings-section-title" style={{ marginTop: 22 }}>Обнаруженные CLI</div>
+          <div className="gg-prov-detected-list">
+            {detectedClis.map(c => (
+              <div key={c.id} className="gg-prov-detected-item">
+                <span className={`gg-prov-detected-dot${c.status === 'found' ? ' is-yellow' : ''}`} />
+                <span className="gg-prov-detected-name">{c.name}</span>
+                <span className="gg-prov-detected-version">{c.version}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Универсальный expand-блок для карточки провайдера: API ключ + (для custom-openai)
+ * Base URL и список моделей. Выделен в отдельный компонент чтобы не дублировать
+ * между «Подключёнными» и «Доступными» секциями.
+ */
+interface ProviderExpandFormProps {
+  p: ProviderConfig
+  keys: Record<string, string>
+  setKeys: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  customOpenaiBaseUrl: string
+  setCustomOpenaiBaseUrl: (v: string) => void
+  customOpenaiModels: string
+  setCustomOpenaiModels: (v: string) => void
+  /** Опциональный hint снизу (например, «Нажми Сохранить» для доступных). */
+  hint?: string
+}
+
+function ProviderExpandForm(props: ProviderExpandFormProps) {
+  const { p, keys, setKeys, customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
+          customOpenaiModels, setCustomOpenaiModels, hint } = props
+  const isCustom = p.id === 'custom-openai'
+  const isYandex = p.id === 'yandex-gpt'
+  const isGigaChat = p.id === 'gigachat'
+
+  return (
+    <div className="gg-prov-card-expand">
+      {isYandex && (
+        <>
+          <div className="gg-label">Folder ID</div>
+          <input
+            className="gg-input"
+            value={keys['yandex_folder_id'] ?? ''}
+            onChange={e => setKeys(k => ({ ...k, yandex_folder_id: e.target.value }))}
+            placeholder="b1g…"
+            spellCheck={false}
+            autoFocus
+          />
+          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
+            Yandex Cloud Console → выбери каталог → ID в адресной строке.
+            Хранится зашифрованно через safeStorage.
+          </div>
+        </>
+      )}
+
+      {isGigaChat && (
+        <>
+          <div className="gg-label">Client Secret</div>
+          <input
+            className="gg-input"
+            type="password"
+            value={keys['gigachat_client_secret'] ?? ''}
+            onChange={e => setKeys(k => ({ ...k, gigachat_client_secret: e.target.value }))}
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            autoFocus
+          />
+          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
+            ⚠ GigaChat использует сертификат Сбера (Russian Trusted Root CA), которого
+            нет в стандартном trust store Node.js. Соединение зашифровано TLS, но
+            CA не проверяется. В следующей версии добавим bundle Russian Trusted CA.
+          </div>
+        </>
+      )}
+
+      {isCustom && (
+        <>
+          <div className="gg-label">Base URL</div>
+          <input
+            className="gg-input"
+            value={customOpenaiBaseUrl}
+            onChange={e => setCustomOpenaiBaseUrl(e.target.value)}
+            placeholder="https://my-endpoint.local/v1 или http://localhost:8000/v1"
+            spellCheck={false}
+            autoFocus
+          />
+          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
+            Любой OpenAI-compatible endpoint: vLLM, LM Studio, Text Generation WebUI, корпоративный шлюз.
+          </div>
+
+          <div className="gg-label">Модели (через запятую)</div>
+          <input
+            className="gg-input"
+            value={customOpenaiModels}
+            onChange={e => setCustomOpenaiModels(e.target.value)}
+            placeholder="qwen2.5-72b-instruct, llama-3.3-70b, mistral-large"
+            spellCheck={false}
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}
+          />
+          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
+            Список ID моделей которые твой endpoint умеет (то что идёт в параметре <code>model</code> запроса).
+          </div>
+        </>
+      )}
+
+      {p.secretKey && (
+        <>
+          <div className="gg-label">{isCustom ? 'API ключ (если endpoint требует)' : 'API ключ'}</div>
+          <input
+            className="gg-input"
+            type="password"
+            value={keys[p.secretKey] ?? ''}
+            onChange={e => setKeys(k => ({ ...k, [p.secretKey!]: e.target.value }))}
+            placeholder={p.keyHint}
+            autoFocus={!isCustom}
+          />
+          {p.keyLink && (
+            <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 6 }}>
+              Получить ключ: <a href={p.keyLink.url} target="_blank" rel="noreferrer">{p.keyLink.label}</a>. Хранится зашифрованно через safeStorage.
+            </div>
+          )}
+        </>
+      )}
+
+      {!p.secretKey && !isCustom && (
+        <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
+          Ключ не нужен — это локальный/embedded провайдер. Нажми «Сохранить» внизу чтобы активировать.
+        </div>
+      )}
+
+      {hint && (
+        <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 8 }}>
+          {hint}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ModelsPage — OpenCode Desktop-style: поиск + группировка по провайдеру +
+// toggle per-модель. Toggle сохраняется в enabled_models — это управляет тем,
+// какие модели появляются в чат-picker'е. Все включены по умолчанию.
+// ════════════════════════════════════════════════════════════════════════════
+
+interface ModelsPageProps {
+  providers: ProviderConfig[]
+  enabledModels: Set<string>
+  setEnabledModels: React.Dispatch<React.SetStateAction<Set<string>>>
+  models: Record<string, string>
+  setModels: React.Dispatch<React.SetStateAction<Record<string, string>>>
+  activeProvider: ProviderId
+  setActiveProvider: (id: ProviderId) => void
+  keys: Record<string, string>
+}
+
+function ModelsPage(props: ModelsPageProps) {
+  const { providers, enabledModels, setEnabledModels, models, setModels, activeProvider, setActiveProvider, keys } = props
+  const [search, setSearch] = useState('')
+
+  // Каталог нужен только для метаданных (теги, цена); группировка по providerId.
+  const catalog = useMemo(() => buildCatalog(providers), [providers])
+  const grouped = useMemo(() => {
+    const map = new Map<ProviderId, typeof catalog>()
+    const t = search.trim().toLowerCase()
+    for (const e of catalog) {
+      if (t && !`${e.model} ${e.providerName}`.toLowerCase().includes(t)) continue
+      const list = map.get(e.providerId) ?? []
+      list.push(e)
+      map.set(e.providerId, list)
+    }
+    return map
+  }, [catalog, search])
+
+  function toggle(key: string) {
+    setEnabledModels(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function setDefault(providerId: ProviderId, model: string) {
+    setActiveProvider(providerId)
+    setModels(m => ({ ...m, [providerId]: model }))
+  }
+
+  return (
+    <div className="gg-settings-extra gg-models-page">
+      <h2 className="gg-settings-page-title">Модели</h2>
+
+      <div className="gg-models-search-wrap">
+        <input
+          className="gg-input gg-models-search"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="🔎 Поиск моделей"
+          spellCheck={false}
+        />
+      </div>
+
+      {providers.map(p => {
+        const list = grouped.get(p.id)
+        if (!list || list.length === 0) return null
+        const status = connectionStatus(p.id, p.secretKey, keys)
+        const isProviderReady = status === 'ready' || status === 'unknown' // unknown = CLI
+        return (
+          <div key={p.id} className="gg-models-group">
+            <div className="gg-models-group-head">
+              <span className="gg-models-group-name">{p.name}</span>
+              {!isProviderReady && (
+                <span className="gg-models-group-warn">нет ключа — подключи на вкладке «Провайдеры»</span>
+              )}
+            </div>
+            <div className="gg-models-group-list">
+              {list.map(e => {
+                const enabled = enabledModels.has(e.key)
+                const isDefault = activeProvider === p.id && (models[p.id] ?? p.defaultModel) === e.model
+                return (
+                  <div key={e.key} className={`gg-models-row ${enabled ? 'is-on' : ''}`}>
+                    <button
+                      type="button"
+                      className="gg-models-row-main"
+                      onClick={() => setDefault(p.id, e.model)}
+                      title="Сделать активной моделью для этого провайдера"
+                    >
+                      <span className="gg-models-row-name">{e.model}</span>
+                      {isDefault && <span className="gg-models-row-default">по умолчанию</span>}
+                      <span className="gg-models-row-tags">
+                        {e.tags.map(t => (
+                          <span key={t} className={`gg-mpal-tag is-${t.toLowerCase().replace(/\$/g, 'd')}`}>{t}</span>
+                        ))}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={enabled}
+                      className={`gg-toggle ${enabled ? 'is-on' : ''}`}
+                      onClick={() => toggle(e.key)}
+                      title={enabled ? 'Отключить из picker’а' : 'Включить в picker'}
+                    >
+                      <span className="gg-toggle-knob" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+
+      {grouped.size === 0 && (
+        <div className="gg-text-tertiary" style={{ padding: 18, textAlign: 'center', fontSize: 'var(--text-sm)' }}>
+          Ничего не найдено
+        </div>
+      )}
+
+      <div className="gg-settings-hint" style={{ marginTop: 16 }}>
+        Toggle справа управляет тем, какие модели появляются в picker’е чата.
+        Клик по строке делает модель дефолтом провайдера и переключает активного провайдера.
+        Поиск работает по имени модели и провайдера.
+      </div>
+    </div>
+  )
+}

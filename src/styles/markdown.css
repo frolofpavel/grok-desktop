@@ -1,0 +1,103 @@
+/* ─── Markdown content in chat messages ─── */
+.gg-md { line-height: 1.6; font-size: var(--text-base); color: var(--text-primary); }
+.gg-md > :first-child { margin-top: 0; }
+.gg-md > :last-child { margin-bottom: 0; }
+
+.gg-md p { margin: 0 0 10px; }
+.gg-md strong { font-weight: 600; color: var(--text-primary); }
+.gg-md em { font-style: italic; color: var(--text-primary); }
+.gg-md del { color: var(--text-tertiary); }
+
+.gg-md h1, .gg-md h2, .gg-md h3, .gg-md h4 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 18px 0 8px;
+  letter-spacing: -0.01em;
+}
+.gg-md h1 { font-size: 18px; }
+.gg-md h2 { font-size: 16px; }
+.gg-md h3 { font-size: 15px; color: var(--text-primary); }
+.gg-md h4 { font-size: 14px; color: var(--text-secondary); }
+
+.gg-md ul, .gg-md ol { margin: 8px 0 10px; padding-left: 22px; }
+.gg-md li { margin: 3px 0; }
+.gg-md li::marker { color: var(--text-tertiary); }
+
+.gg-md blockquote {
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 12px;
+  margin: 8px 0;
+  color: var(--text-secondary);
+}
+
+.gg-md hr { border: none; border-top: 1px solid var(--border-default); margin: 16px 0; }
+
+.gg-md a { color: var(--accent); }
+.gg-md a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+/* Inline code — theme-aware. Hard-coded color was invisible on light theme
+ * (в белой теме ссылки и прочее в другом дизайне,
+ * а то не видно"). Now uses --text-code / --bg-code / --border-code defined
+ * per theme in theme.css. */
+.gg-md :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-code);
+  border: 1px solid var(--border-code);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--text-code);
+}
+
+/* Code blocks (we render these with the CodeBlock component) */
+.gg-code-block {
+  margin: 10px 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.gg-code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg-overlay);
+  border-bottom: 1px solid var(--border-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.gg-code-header .gg-code-copy {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all 120ms ease;
+}
+.gg-code-header .gg-code-copy:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.gg-code-block pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.gg-code-block code { background: transparent; border: none; padding: 0; color: inherit; }
+
+/* Tables */
+.gg-md table {
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: var(--text-sm);
+  width: 100%;
+}
+.gg-md th, .gg-md td {
+  border: 1px solid var(--border-default);
+  padding: 6px 10px;
+  text-align: left;
+}
+.gg-md th { background: var(--bg-overlay); font-weight: 600; }

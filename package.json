@@ -1,0 +1,144 @@
+{
+  "name": "verstak",
+  "version": "1.3.0",
+  "description": "Desktop AI coding agent: 15+ model providers (API + CLI + local), full control & transparency, connectors, skills",
+  "main": "out/main/main.mjs",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "pretest": "node scripts/safe-rebuild.cjs",
+    "test": "vitest run",
+    "pretest:fast": "node scripts/safe-rebuild.cjs",
+    "test:fast": "vitest run",
+    "type": "tsc --noEmit",
+    "rebuild:node": "npm rebuild better-sqlite3 --runtime=node --update-binary",
+    "electron-rebuild": "electron-rebuild -f -o better-sqlite3",
+    "predev": "npm run electron-rebuild",
+    "dist": "npm run electron-rebuild && npm run build && electron-builder",
+    "dist:win": "npm run electron-rebuild && npm run build && electron-builder --win --x64",
+    "dist:linux": "npm run build && electron-builder --linux --x64",
+    "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
+    "dist:all": "npm run build && electron-builder --win --linux --mac"
+  },
+  "build": {
+    "appId": "ru.verstak.ide",
+    "productName": "Verstak",
+    "copyright": "Copyright © 2026 Pavel Frolov",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/**/{CHANGELOG.md,README.md,readme.md,*.test.*,test,tests,__tests__,docs}",
+      "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
+    ],
+    "npmRebuild": false,
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "resources/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Verstak",
+      "artifactName": "Verstak-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Verstak-Portable-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "resources/icon.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "resources/icon.png",
+      "category": "Development"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "frolofpavel",
+      "repo": "verstak"
+    }
+  },
+  "bin": {
+    "verstak": "./scripts/verstak-cli.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/diff": "^7.0.2",
+    "@types/node": "^25.9.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "electron": "^40.10.0",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13",
+    "vitest": "^4.1.6"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.97.0",
+    "@fontsource/geist-mono": "^5.2.8",
+    "@fontsource/geist-sans": "^5.2.5",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@google/genai": "^2.4.0",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
+    "better-sqlite3": "^12.10.0",
+    "diff": "^9.0.0",
+    "docx": "^9.6.1",
+    "electron-updater": "^6.8.3",
+    "exceljs": "^4.4.0",
+    "highlight.js": "^11.11.1",
+    "mammoth": "^1.12.0",
+    "openai": "^6.38.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0",
+    "zustand": "^5.0.13"
+  }
+}

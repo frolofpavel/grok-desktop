@@ -1,0 +1,292 @@
+import { useEffect, useRef, useState } from 'react'
+import { I18nContext, getTranslations, type Lang } from './i18n'
+import { AuthScreen } from './components/AuthScreen'
+import { ProjectRail } from './components/ProjectRail'
+import { Sidebar } from './components/Sidebar'
+import { Settings } from './components/Settings'
+import { Chat } from './components/Chat'
+import { TasksView } from './components/TasksView'
+import { JournalView } from './components/JournalView'
+import { PlanView } from './components/PlanView'
+import { FeedbackView } from './components/FeedbackView'
+import { BrowserView } from './components/BrowserView'
+import { DesignView } from './components/DesignView'
+import { StubView } from './components/StubView'
+import { SkillsView } from './components/SkillsView'
+import { AgentRunInspector } from './components/AgentRunInspector'
+import { WorkflowView } from './components/WorkflowView'
+import { MemoryGovernance } from './components/MemoryGovernance'
+import { DiffView } from './components/DiffView'
+import { CommandConfirm } from './components/CommandConfirm'
+import { UpdateNotification } from './components/UpdateNotification'
+import { Terminal } from './components/Terminal'
+import { FilesPanel } from './components/FilesPanel'
+import { SideChat } from './components/SideChat'
+import { OnboardingWizard } from './components/OnboardingWizard'
+import { ArtifactPreviewContainer } from './components/ArtifactPreview'
+import { TerminalErrorToast } from './components/TerminalErrorToast'
+import { useProject } from './store/projectStore'
+import { useSkills as useSkillsStore } from './store/skillStore'
+
+const SIDEBAR_MIN = 200
+const SIDEBAR_MAX = 480
+const SIDEBAR_DEFAULT = 260
+const SIDEBAR_WIDTH_KEY = 'gg.sidebarWidth'
+
+export function App() {
+  const [showSettings, setShowSettings] = useState(false)
+  // Right docked panel: one of terminal / files / sidechat / none (Codex-style selector).
+  const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'files' | 'sidechat'>('none')
+  // Lazily-created dedicated side-chat session id. Created on first open of the
+  // side-chat panel, reused while the panel stays open within a project.
+  const [sideChatId, setSideChatId] = useState<number | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [lang, setLang] = useState<Lang>('en')
+
+  useEffect(() => {
+    window.api.settings.getKey('app_language').then(v => {
+      if (v === 'ru' || v === 'en') setLang(v)
+    }).catch(() => {})
+  }, [])
+
+  const t = getTranslations(lang)
+
+  // ── Auth gate: null = загрузка, false = нужна авторизация, true = готово ──
+  const [authDone, setAuthDone] = useState<boolean | null>(null)
+  useEffect(() => {
+    void (async () => {
+      try {
+        // Если ровно 1 профиль — автовход без экрана
+        const [authVal, profiles] = await Promise.all([
+          window.api.settings.getKey('auth_completed'),
+          window.api.userProfiles.list(),
+        ])
+        if (authVal === 'true') {
+          setAuthDone(true)
+        } else if (profiles.length === 1) {
+          // Авто-вход: один профиль, экран не нужен
+          await window.api.userProfiles.setActive(profiles[0].id)
+          await window.api.settings.setKey('auth_completed', 'true')
+          setAuthDone(true)
+        } else {
+          setAuthDone(false)
+        }
+      } catch {
+        // Первый запуск — нет settings
+        setAuthDone(false)
+      }
+    })()
+  }, [])
+
+  // Onboarding: показывается при первом запуске пока не помечен completed
+  // в settings. После — больше не появляется.
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  useEffect(() => {
+    if (!authDone) return
+    void (async () => {
+      try {
+        const done = await window.api.settings.getKey('onboarding_completed')
+        if (!done) setShowOnboarding(true)
+      } catch { /* первый запуск, settings ещё нет */ setShowOnboarding(true) }
+    })()
+  }, [authDone])
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const stored = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || '0', 10)
+    return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
+  })
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand } = useProject()
+  // Panels require an open project (the terminal/file tree are project-scoped).
+  const effectiveRightPanel = path ? rightPanel : 'none'
+
+  // Project switch invalidates the side-chat session (chat sessions are
+  // project-scoped). Drop the id and close the panel if it was open.
+  useEffect(() => {
+    setSideChatId(null)
+    setRightPanel(p => (p === 'sidechat' ? 'none' : p))
+  }, [path])
+
+  // Open the side-chat panel — lazily create a dedicated background chat
+  // session the first time (separate from the active left-list chat).
+  async function openSideChat() {
+    if (!path) return
+    if (sideChatId == null) {
+      try {
+        const created = await window.api.chatSessions.create(path, { title: 'Боковой чат' })
+        setSideChatId(created.id)
+      } catch { return }
+    }
+    setRightPanel('sidechat')
+  }
+
+  // Ctrl/Cmd+B toggles the project sidebar; Esc cancels active stream (safety
+  // net — if the UI ever feels stuck during a long agentic loop, Esc kills it).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'b' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault()
+        setSidebarOpen(v => !v)
+      } else if (e.key === 'Tab' && e.shiftKey && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        // Shift+Tab — cycle через agent mode (как в Claude Code). Игнорируем
+        // когда фокус в input/textarea (там Shift+Tab — обычная навигация).
+        e.preventDefault()
+        const modes: Array<'ask' | 'accept-edits' | 'plan' | 'auto' | 'bypass'> = ['ask', 'accept-edits', 'plan', 'auto', 'bypass']
+        void (async () => {
+          const current = (await window.api.settings.getKey('agent_mode')) as typeof modes[number] | null
+          const idx = modes.indexOf(current ?? 'ask')
+          const next = modes[(idx + 1) % modes.length]
+          await window.api.settings.setKey('agent_mode', next)
+        })()
+      } else if (e.key === 'Escape' && e.shiftKey) {
+        // Shift+Esc = emergency abort. Tell main to kill every active stream
+        // and clear any pending confirmations, then reset renderer state so
+        // the UI never sticks in a stuck-streaming state.
+        e.preventDefault()
+        void window.api.ai.stop(0).catch(() => {})
+        setStreaming(false)
+        clearPendingWrites()
+        setPendingCommand(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isStreaming, setStreaming, clearPendingWrites, setPendingCommand])
+
+  // Mouse-drag resize handle on the sidebar's right edge.
+  function startDrag(e: React.MouseEvent) {
+    dragRef.current = { startX: e.clientX, startW: sidebarWidth }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    // Track the latest value the drag computed so we can persist it on `up`
+    // without depending on React state flushing in time.
+    let latest = dragRef.current.startW
+    function move(ev: MouseEvent) {
+      if (!dragRef.current) return
+      const dx = ev.clientX - dragRef.current.startX
+      latest = Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, dragRef.current.startW + dx))
+      setSidebarWidth(latest)
+    }
+    function up() {
+      dragRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      // Persist directly from the most recent move's value — no DOM read,
+      // no race with React's flush.
+      try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(latest))) } catch { /* private mode */ }
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+  }
+
+  // Push width to CSS via custom property so the grid recomputes.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--gg-sidebar-w', `${sidebarWidth}px`)
+    try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth)) } catch { /* ignore */ }
+  }, [sidebarWidth])
+
+  // Пока проверяем auth — ничего не рендерим
+  if (authDone === null) return null
+  // Нужна авторизация — показываем AuthScreen поверх всего
+  if (!authDone) return (
+    <I18nContext.Provider value={getTranslations(lang)}>
+      <AuthScreen onComplete={() => setAuthDone(true)} onLangChange={setLang} />
+    </I18nContext.Provider>
+  )
+
+  return (
+    <I18nContext.Provider value={getTranslations(lang)}>
+    <div className={`gg-app ${sidebarOpen ? '' : 'is-sidebar-collapsed'}`}>
+      <ProjectRail
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen(v => !v)}
+      />
+      {sidebarOpen && (
+        <>
+          <Sidebar onOpenSettings={() => setShowSettings(true)} />
+          <div
+            className="gg-sidebar-resize"
+            onMouseDown={startDrag}
+            title={t.settings.resizeDrag}
+          />
+        </>
+      )}
+      <main className="gg-main">
+        {/* Chat НЕ размонтируется при уходе на другие вкладки — иначе его
+            слушатель ai:event отваливается и фоновый стрим (CLI вроде Codex)
+            теряет ответ. Прячем через display:none, слушатель остаётся жив. */}
+        <div className="gg-chat-area" style={activeView === 'chat' ? undefined : { display: 'none' }}>
+            <Chat
+              onOpenSettings={() => setShowSettings(true)}
+              rightPanel={effectiveRightPanel}
+              onSelectRightPanel={setRightPanel}
+              onOpenSideChat={() => void openSideChat()}
+            />
+            {effectiveRightPanel === 'terminal' && (
+              <div className="gg-terminal-wrap">
+                <div className="gg-terminal-header">
+                  <span className="gg-terminal-dot" />
+                  <span>{t.views.terminal}</span>
+                  <button
+                    className="gg-terminal-close"
+                    onClick={() => setRightPanel('none')}
+                    title={t.views.hide}
+                  >×</button>
+                </div>
+                <div className="gg-terminal-body">
+                  <Terminal />
+                </div>
+              </div>
+            )}
+            {effectiveRightPanel === 'files' && (
+              <FilesPanel onClose={() => setRightPanel('none')} />
+            )}
+            {effectiveRightPanel === 'sidechat' && sideChatId != null && (
+              <SideChat sideChatId={sideChatId} onClose={() => setRightPanel('none')} />
+            )}
+        </div>
+        {activeView === 'tasks' && <TasksView />}
+        {activeView === 'journal' && <JournalView />}
+        {activeView === 'inspector' && <AgentRunInspector />}
+        {activeView === 'memory-gov' && <MemoryGovernance />}
+        {activeView === 'plan' && <PlanView />}
+        {activeView === 'workflow' && <WorkflowView />}
+        {activeView === 'calendar' && <StubView title="Calendar" description="Здесь будут события и дедлайны проекта. В работе." />}
+        {activeView === 'feedback' && <FeedbackView />}
+        {activeView === 'browser' && <BrowserView />}
+        {activeView === 'skills' && (
+          <SkillsView
+            onActivateSkill={slash => {
+              // Активируем скилл по slash-имени, затем переходим в чат
+              const skills = useSkillsStore.getState().skills
+              const skill = skills.find(s => s.slash === slash || s.id === slash)
+              if (skill) useSkillsStore.getState().setActiveSkill(skill.id)
+              setActiveView('chat')
+            }}
+          />
+        )}
+        {activeView === 'design' && <DesignView onGoToChat={() => setActiveView('chat')} />}
+        {activeView === 'video' && (
+          <div className="gg-view-placeholder">
+            <div className="gg-view-placeholder-icon">🎬</div>
+            <h2>{t.views.videoTitle}</h2>
+            <p>{t.views.videoDesc}</p>
+            <p className="gg-view-placeholder-hint">{t.views.videoHint}</p>
+            <div className="gg-view-placeholder-actions">
+              <button onClick={() => setActiveView('chat')}>{t.views.videoCreate}</button>
+            </div>
+          </div>
+        )}
+      </main>
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+      {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
+      <ArtifactPreviewContainer />
+      <TerminalErrorToast />
+      <DiffView />
+      <CommandConfirm />
+      <UpdateNotification />
+    </div>
+    </I18nContext.Provider>
+  )
+}
