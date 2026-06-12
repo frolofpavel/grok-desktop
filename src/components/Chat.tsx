@@ -1285,7 +1285,7 @@ function AttachmentPreview({ attachment, compact }: { attachment: Attachment; co
         src={`data:${attachment.mimeType};base64,${attachment.data}`}
         alt={attachment.name}
         className={compact ? 'gg-msg-image' : ''}
-        style={{ maxWidth: compact ? 360 : '100%', maxHeight: compact ? 280 : '100%', borderRadius: 8, display: 'block', marginBottom: 6 }}
+        style={{ maxWidth: compact ? 360 : '100%', maxHeight: compact ? 280 : '100%', borderRadius: 'var(--radius-sm)', display: 'block', marginBottom: 6 }}
       />
     )
   }

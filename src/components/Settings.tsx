@@ -1533,7 +1533,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
                       </td>
                       <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
                         <span style={{
-                          padding: '1px 6px', borderRadius: 4, fontSize: 11,
+                          padding: '1px 6px', borderRadius: 'var(--radius-xs)', fontSize: 11,
                           background: e.action === 'error' ? 'var(--gg-error-bg, #3a1a1a)' : 'var(--gg-tag-bg, #1a2a3a)',
                           color: e.action === 'error' ? 'var(--gg-error, #f87171)' : 'var(--gg-accent, #60a5fa)'
                         }}>

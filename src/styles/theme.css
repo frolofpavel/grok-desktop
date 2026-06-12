@@ -63,6 +63,7 @@
   --text-base: 13.5px;
   --text-md: 14px;
   --text-lg: 16px;
+  --text-xl: 20px;
 
   /* Spacing */
   --space-1: 4px;
@@ -72,11 +73,15 @@
   --space-5: 20px;
   --space-6: 24px;
 
-  /* Radii — consistent scale. data-radius="square" zeroes these out below. */
-  --radius-sm: 5px;
-  --radius-md: 7px;
-  --radius-lg: 11px;
-  --radius-xl: 15px;
+  /* Radii — consistent scale (grok.com-style: крупнее, мягче).
+   * xs — инлайн-чипы/kbd, sm — кнопки/инпуты, md — карточки/попапы,
+   * lg — модалки/композер, xl — крупные панели, pill — пилюли.
+   * data-radius="square" zeroes these out below. */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
   --radius-pill: 999px;
 
   /* Elevation — layered for a softer, more "expensive" depth. The hairline ring
@@ -331,6 +336,7 @@ html[data-theme="gruvbox"] {
 
 /* ─── Squared corners toggle (data-radius="square"). Opt-in, additive. ─── */
 html[data-radius="square"] {
+  --radius-xs: 0px;
   --radius-sm: 0px;
   --radius-md: 2px;
   --radius-lg: 3px;
@@ -359,15 +365,15 @@ code, pre { font-family: var(--font-mono); font-feature-settings: "calt", "ss01"
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-/* ─── Scrollbar ─── */
-::-webkit-scrollbar { width: 8px; height: 8px; }
+/* ─── Scrollbar — тонкий, overlay-стиль ─── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: 8px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
-/* ─── Selection ─── */
-::selection { background: var(--accent-muted); color: var(--text-primary); }
+/* ─── Selection — полупрозрачный акцент (белый на тёмной, чёрный на светлой) ─── */
+::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--text-primary); }
 
 /* ─── Common atoms ─── */
 .gg-btn {
@@ -376,9 +382,9 @@ a:hover { text-decoration: underline; }
   background: var(--bg-elevated);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: var(--text-sm); font-weight: 500;
-  transition: all 120ms ease;
+  transition: all 150ms ease;
 }
 .gg-btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
 .gg-btn:active { transform: scale(0.98); }
@@ -420,9 +426,9 @@ a:hover { text-decoration: underline; }
   background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   font-size: var(--text-base);
-  transition: border-color 120ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
   outline: none;
 }
 .gg-input:hover { border-color: var(--border-strong); }
@@ -445,7 +451,7 @@ a:hover { text-decoration: underline; }
   background: var(--bg-overlay);
   border: 1px solid var(--border-default);
   border-bottom-width: 2px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--text-secondary);
