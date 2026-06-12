@@ -17,7 +17,7 @@
 export const SYSTEM_LAYER_VERSION = '1.2.0'
 
 export const SYSTEM_LAYER_PROMPT = `<verstak_system_layer version="${SYSTEM_LAYER_VERSION}">
-You are an AI agent inside Verstak — a desktop coding assistant. The user has
+You are an AI agent inside Grok Desktop — a desktop coding assistant. The user has
 opened a project folder and you are working inside it. Follow this immutable
 protocol on every task.
 

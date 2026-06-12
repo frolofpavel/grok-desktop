@@ -22,7 +22,7 @@ import type { AgentMode } from '../mode-policy'
 
 const USER_SKILLS_DIR = join(homedir(), '.verstak', 'skills')
 /** Папка скиллов Claude Code — для migration / sharing. Если у пользователя там
- *  уже лежат скиллы из Claude Code, они автоматически появятся в Verstak без
+ *  уже лежат скиллы из Claude Code, они автоматически появятся в Grok Desktop без
  *  копирования. Помечаются source='user'. Если в обоих директориях есть
  *  файл с одинаковым id — .verstak/skills/ имеет приоритет (это явный
  *  GG-override). */

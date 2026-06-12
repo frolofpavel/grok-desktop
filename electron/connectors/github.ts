@@ -41,7 +41,7 @@ async function githubApi(
     const headers: Record<string, string> = {
       'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'Verstak',
+      'User-Agent': 'GrokDesktop',
       'X-GitHub-Api-Version': '2022-11-28'
     }
     if (bodyStr) {

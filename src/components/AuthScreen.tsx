@@ -180,8 +180,8 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   if (langChosen === false) {
     return (
       <div className="gg-lang-picker">
-        <div className="gg-lang-picker-logo">V</div>
-        <h1>Verstak</h1>
+        <div className="gg-lang-picker-logo">G</div>
+        <h1>Grok Desktop</h1>
         <p>Choose your language / Выберите язык</p>
         <div className="gg-lang-buttons">
           <button onClick={() => { setLangChosen(true); onLangChange('en'); void window.api.settings.setKey('app_language', 'en') }}>
@@ -220,8 +220,8 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
         {/* Контент поверх */}
         <div className="gg-auth-left-content">
           <div className="gg-auth-logo-wrap">
-            <div className="gg-auth-logo-icon">V</div>
-            <span className="gg-auth-logo-text">Verstak</span>
+            <div className="gg-auth-logo-icon">G</div>
+            <span className="gg-auth-logo-text">Grok Desktop</span>
           </div>
           <p className="gg-auth-tagline">{t.auth.tagline}</p>
 

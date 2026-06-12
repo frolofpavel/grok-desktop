@@ -667,7 +667,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       // skillPrompt в prepareSystemContext — см. <skill_layer>), так что протокол
       // выполнения восстановлен. Но тело таких скиллов всё равно может сильно
       // давить «жди ТЗ»; nudge — дешёвое подкрепление: ясный запрос = действуй.
-      const antiStallNudge = '\n\n---\nВАЖНО (Verstak): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
+      const antiStallNudge = '\n\n---\nВАЖНО (Grok Desktop): если пользователь дал ясный прямой запрос — выполни его прямо в этом чате и выдай результат. Не зацикливайся, прося оформить «пакет задачи», «одну фразу цели» или ждать отдельного «ок», если намерение уже понятно.'
       sendId = await window.api.ai.sendWithOverrides(allMessages, path, {
         systemPrompt: activeSkill.systemPrompt + antiStallNudge,
         ...(overrideProvider ? { providerId: overrideProvider } : {}),
@@ -784,7 +784,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         <div className="gg-chat-stream-inner">
         {!hasMessages && (
           <div className="gg-chat-empty">
-            <img src={iconUrl} alt="Verstak" className="gg-chat-empty-mark-img" />
+            <img src={iconUrl} alt="Grok Desktop" className="gg-chat-empty-mark-img" />
             <div className="gg-chat-empty-title">Готов к работе</div>
             <div className="gg-chat-empty-hint">
               Открой проект слева и напиши задачу. Можно прикрепить файл, бросить скриншот через Ctrl+V или drag-and-drop.

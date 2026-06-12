@@ -67,7 +67,7 @@ function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
-    title: 'Verstak',
+    title: 'Grok Desktop',
     icon: iconPath,
     webPreferences: {
       preload: join(HERE, '../preload/preload.mjs'),
@@ -145,7 +145,7 @@ function installCSP(): void {
 // Tell Windows this is its own application so the taskbar uses our icon
 // (and not the generic Electron / Node icon).
 if (process.platform === 'win32') {
-  app.setAppUserModelId('ru.verstak.ide')
+  app.setAppUserModelId('ru.grokdesktop.app')
 }
 
 app.whenReady().then(() => {
@@ -155,20 +155,20 @@ app.whenReady().then(() => {
   mkdirSync(dir, { recursive: true })
   let db
   try {
-    db = openDb(join(dir, 'verstak.db'))
+    db = openDb(join(dir, 'grok-desktop.db'))
   } catch (err) {
     // DB locked, disk full, schema migration failed — show GUI error
     // instead of crashing silently with stderr only.
     const msg = err instanceof Error ? err.message : String(err)
     dialog.showErrorBox(
-      'Verstak: не удалось открыть базу данных',
-      `Путь: ${join(dir, 'verstak.db')}\n\nОшибка: ${msg}\n\n` +
-      `Возможные причины: файл заблокирован другим процессом Verstak, ` +
+      'Grok Desktop: не удалось открыть базу данных',
+      `Путь: ${join(dir, 'grok-desktop.db')}\n\nОшибка: ${msg}\n\n` +
+      `Возможные причины: файл заблокирован другим процессом Grok Desktop, ` +
       `диск переполнен, или повреждённая миграция схемы.\n\n` +
       `Что попробовать:\n` +
-      `1. Закрой все другие копии Verstak\n` +
+      `1. Закрой все другие копии Grok Desktop\n` +
       `2. Проверь свободное место на диске\n` +
-      `3. Если ничего не помогает — переименуй verstak.db в .bak и перезапусти ` +
+      `3. Если ничего не помогает — переименуй grok-desktop.db в .bak и перезапусти ` +
       `(чаты будут потеряны, но проект откроется)`
     )
     app.quit()

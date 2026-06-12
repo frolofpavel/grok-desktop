@@ -89,7 +89,7 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar }: ProjectRailProps) 
           onClick={() => useProject.getState().closeProject()}
           title="Главная"
         >
-          <img src={iconUrl} alt="Verstak" />
+          <img src={iconUrl} alt="Grok Desktop" />
         </button>
         <button
           type="button"

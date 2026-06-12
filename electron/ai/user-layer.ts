@@ -43,7 +43,7 @@ export async function loadUserLayer(projectRoot: string | null): Promise<UserLay
   return { path: null, content: '' }
 }
 
-const DEFAULT_RULES = `# Verstak Rules
+const DEFAULT_RULES = `# Grok Desktop Rules
 
 Эти правила читает AI агент при каждой задаче в этом проекте.
 Дополни их под свой стек и стиль — система прибавит их к встроенному

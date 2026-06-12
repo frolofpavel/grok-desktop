@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * Verstak CLI — запуск AI-агента из терминала без GUI.
+ * Grok Desktop CLI — запуск AI-агента из терминала без GUI.
  *
  * Самодостаточный скрипт на plain ES modules: без Electron, без TypeScript.
  * Делает прямые HTTPS-запросы к провайдерам, выполняет инструменты локально.
  *
  * Использование:
- *   node scripts/verstak-cli.mjs "исправь баг в src/auth.ts"
- *   node scripts/verstak-cli.mjs -p claude -m claude-sonnet-4-6 "объясни этот код"
- *   echo "fix tests" | node scripts/verstak-cli.mjs --stdin
- *   node scripts/verstak-cli.mjs --json "найди все TODO"
+ *   node scripts/grok-desktop-cli.mjs "исправь баг в src/auth.ts"
+ *   node scripts/grok-desktop-cli.mjs -p grok -m grok-4 "объясни этот код"
+ *   echo "fix tests" | node scripts/grok-desktop-cli.mjs --stdin
+ *   node scripts/grok-desktop-cli.mjs --json "найди все TODO"
  */
 
 import { parseArgs } from 'node:util'
@@ -51,14 +51,14 @@ const { values, positionals } = parseArgs({
 
 if (values.help) {
   console.log(`
-Verstak CLI — AI-агент в терминале без GUI
+Grok Desktop CLI — AI-агент в терминале без GUI
 
 Использование:
-  verstak "ваш промпт"
-  verstak -p claude -m claude-sonnet-4-6 "исправь баг"
-  echo "объясни это" | verstak --stdin
-  verstak --json "найди все TODO-комментарии"
-  node scripts/verstak-cli.mjs "ваш промпт"
+  grok-desktop "ваш промпт"
+  grok-desktop -p grok -m grok-4 "исправь баг"
+  echo "объясни это" | grok-desktop --stdin
+  grok-desktop --json "найди все TODO-комментарии"
+  node scripts/grok-desktop-cli.mjs "ваш промпт"
 
 Опции:
   -p, --provider   AI-провайдер: gemini-api (по умолч), claude, grok, openai,
@@ -88,9 +88,9 @@ Env-переменные:
   GIGACHAT_CLIENT_ID   GigaChat (Client ID для OAuth)
 
 Примеры:
-  GEMINI_API_KEY=xxx node scripts/verstak-cli.mjs "list all TODO"
-  ANTHROPIC_API_KEY=xxx node scripts/verstak-cli.mjs -p claude "fix src/auth.ts"
-  node scripts/verstak-cli.mjs -p openrouter --key sk-or-xxx "explain this codebase"
+  GEMINI_API_KEY=xxx node scripts/grok-desktop-cli.mjs "list all TODO"
+  ANTHROPIC_API_KEY=xxx node scripts/grok-desktop-cli.mjs -p claude "fix src/auth.ts"
+  node scripts/grok-desktop-cli.mjs -p openrouter --key sk-or-xxx "explain this codebase"
 `)
   process.exit(0)
 }
@@ -98,7 +98,7 @@ Env-переменные:
 if (values.version) {
   const pkgPath = resolve(__dirname, '../package.json')
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
-  console.log(`Verstak CLI v${pkg.version}`)
+  console.log(`Grok Desktop CLI v${pkg.version}`)
   process.exit(0)
 }
 
@@ -178,7 +178,7 @@ if (values.stdin || (!prompt && !process.stdin.isTTY)) {
 }
 
 if (!prompt) {
-  console.error('Ошибка: укажите промпт как аргумент или передайте через --stdin\nДля справки: verstak --help')
+  console.error('Ошибка: укажите промпт как аргумент или передайте через --stdin\nДля справки: grok-desktop --help')
   process.exit(1)
 }
 

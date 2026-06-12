@@ -1,145 +1,48 @@
-# Verstak
+# Grok Desktop
 
-Open-source desktop AI coding IDE. Vendor-agnostic, 10+ providers, persistent memory, parallel agents.
+Desktop AI coding agent for Grok (xAI). Electron + TypeScript + React, local-first: your API key, your machine, no cloud account.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
----
-
-## What is Verstak
-
-Verstak is a desktop AI coding assistant built on Electron + TypeScript + React. It's a local-first alternative to Cursor, Claude Code, and GitHub Copilot that runs entirely on your own API keys or existing CLI subscriptions — no cloud account required beyond the providers you already use.
-
-The key idea: never be locked in. If one provider is down or expensive, switch in one click. Your project context, memory, and chat history stay local.
+> TODO: replace the app icon in `resources/` (still the old Verstak icon).
 
 ---
+
+## What is it
+
+Grok Desktop is a desktop AI coding assistant built around Grok models. Two providers:
+
+| Provider | Transport | Needs |
+|---|---|---|
+| **Grok API** | xAI REST API | `XAI_API_KEY` (Settings) |
+| **Grok Build** | CLI (`grok` binary) | installed + logged-in CLI |
+
+Project context, chat history and memory are stored locally in SQLite.
 
 ## Features
 
-### Providers (10+)
-
-**API providers** (bring your own key):
-- Gemini, Claude, Grok, ChatGPT, OpenRouter, DeepSeek, Mistral, Groq, Ollama, Custom OpenAI-compatible
-
-**CLI providers** (use your existing subscription):
-- Claude Code, Codex, Gemini CLI, Grok Build, Hermes, Aider
-
-Verstak **auto-detects installed CLIs on startup**. Switch provider and model per chat — background sessions keep streaming when you switch projects.
-
----
-
-### Memory (Hermes-style)
-
-Verstak maintains persistent memory across sessions, not just a long context window:
-
-| Layer | What it stores |
-|---|---|
-| **Core Memory** | `MEMORY.md` + `USER.md` always injected into context. Agent self-updates these. |
-| **Archival Memory** | FTS5-indexed facts searchable across all sessions |
-| **Conversation Search** | Full-text search across all past chats |
-
-Memory is visible and editable in Settings → Memory.
-
----
-
-### Agent Capabilities
-
-- **20+ tools:** read/write files, terminal, search, browser navigation, diagnostics
-- **`check_diagnostics`** — runs `tsc --noEmit` as a native agent tool; agent sees and fixes type errors in the loop
-- **`delegate_parallel`** — dispatches 2–5 subtasks to different providers simultaneously and merges results
-- **Auto cross-verify** — second provider reviews code changes automatically (configurable)
-- **Effort control** — quick / standard / deep thinking toggle per message
-- **Auto-compact** — session summarization kicks in at 95% context window, no context overflow errors
-- **Loop detection** — same tool + args called 3× triggers supervisor break; max turns per send configurable
-- **Exponential backoff** — automatic retry on 429 / 503 / ECONNRESET
-
----
-
-### UI / UX
-
-- Multi-project sidebar with: **Chat · Tasks · Journal · Plan · Skills · Browser · Design · Video**
-- Multi-chat per project — rename, delete, background sessions keep streaming
-- Multi-file diff modal — accept/reject all changes from one turn in a single view
-- Premium auth screen with Higgsfield-generated video background
-- Connector marketplace (card grid, Codex-style)
-- Custom commands from `.md` files (Skills system)
-- Cost estimator in composer — shows `↑ tokens · ↓ tokens · $cost` per send
-- Dark / light theme
-
----
-
-### Connectors (11)
-
-GitHub, Google Sheets, Telegram Bot, SSH Executor, Битрикс24, Яндекс.Директ, Яндекс.Диск, 1С OData, Generic HTTP API, Skills Server, Custom OpenAI-compatible endpoint.
-
-Credentials stored in encrypted `safeStorage` (Electron built-in), never in prompts or logs.
-
----
-
-### Security
-
-- **Secret scanner** — API keys, tokens, JWTs, private key blocks redacted as `[REDACTED:type]` in all tool outputs and logs
-- **Path policy** — `.env`, `.ssh`, `.aws`, `*.key`, `*.pem`, `creds*`, `cookies` blocked at read/write/list level
-- **No telemetry** — nothing leaves your machine except calls to the providers you configure
-- **No cloud dependency** — SQLite local storage, all state on disk
-
----
+- **5 agent modes** — `ask` / `accept-edits` / `plan` / `auto` / `bypass`, switched with keys 1–5
+- **Undo & checkpoints** — per-file undo stack + one-click rollback of a whole agent session
+- **Skills** — frontmatter `.md` files become system prompts + tool allowlists; auto-import from `~/.claude/skills/` and `~/.verstak/skills/`, slash commands in the composer
+- **Artifacts** — `generate_html` / `generate_docx` / `render_chart` (SVG) with embedded preview
+- **Built-in terminal** (node-pty + xterm.js) with error detection → "Fix in chat"
+- **Cost controller** — token/cost estimate per send, status-bar totals
+- **Persistent memory** — core memory (`MEMORY.md`/`USER.md`), archival facts, conversation search
+- **Connectors** — GitHub, SSH executor, generic HTTP API
+- **Security** — secret scanner (`[REDACTED:type]`), path policy blocking `.env`/keys/creds, no telemetry
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/frolofpavel/verstak.git
-cd verstak
+git clone <repo-url>
+cd grok-desktop
 npm install --legacy-peer-deps
-npm run electron-rebuild
 npm run dev
 ```
 
-Then open Settings (⚙), pick a provider, paste your API key — or select a CLI provider if the binary is on your PATH and already logged in.
+Open Settings, paste your xAI API key — or select Grok Build if the `grok` CLI is on your PATH.
 
----
-
-## Download
-
-| Platform | Command | Output |
-|----------|---------|--------|
-| **Windows** | `npm run dist:win` | NSIS installer + portable `.exe` |
-| **Linux** | `npm run dist:linux` | AppImage + `.deb` |
-| **macOS** | `npm run dist:mac` | `.dmg` + `.zip` |
-| **All** | `npm run dist:all` | All platforms |
-
-Pre-built binaries: see [Releases](https://github.com/frolofpavel/verstak/releases)
-
-### Linux notes
-- AppImage: `chmod +x Verstak-*.AppImage && ./Verstak-*.AppImage`
-- If you get a sandbox error, the app handles it automatically (appends `--no-sandbox` for AppImage)
-- For encrypted credential storage, install `libsecret-1-dev` (Ubuntu/Debian) or `libsecret-devel` (Fedora): `sudo apt install libsecret-1-dev gnome-keyring`
-- Without gnome-keyring/KDE Wallet, API keys are stored in base64 (not encrypted) — functional but less secure
-
----
-
-## CLI Auto-Detection
-
-On startup, Verstak scans your PATH for installed CLI tools and makes them available as providers instantly — no manual configuration needed:
-
-| Tool | Command |
-|---|---|
-| Claude Code | `claude` |
-| Codex | `codex` |
-| Gemini CLI | `gemini` |
-| Grok Build | `grok` |
-| Hermes | `hermes` |
-| Aider | `aider` |
-
----
-
-## Stack
-
-Electron 40 · React 19 · TypeScript · Zustand · better-sqlite3 · Vite · node-pty · xterm.js
-
----
-
-## Scripts
+## Commands
 
 | Command | Does |
 |---|---|
@@ -147,17 +50,14 @@ Electron 40 · React 19 · TypeScript · Zustand · better-sqlite3 · Vite · no
 | `npm run build` | Production bundle → `out/` |
 | `npm run type` | `tsc --noEmit` |
 | `npm run test:fast` | Vitest (skip native rebuild) |
-| `npm run dist:win` | NSIS + portable installer |
+| `npm run test` | Rebuild better-sqlite3 + Vitest |
+| `npm run dist:win` | NSIS + portable `.exe` |
 
----
+Before committing: `npm run type && npm run test:fast` must pass.
 
-## Contributing
+## Stack
 
-PRs welcome. See [CLAUDE.md](CLAUDE.md) for architecture docs, file zone rules, and code conventions.
-
-Before submitting: `npm run type && npm run test:fast` must pass.
-
----
+Electron 40 · React 19 · TypeScript · Zustand · better-sqlite3 · Vite · node-pty · xterm.js
 
 ## License
 

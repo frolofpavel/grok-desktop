@@ -4,7 +4,7 @@
  * Идея портирована из Agent Studio (app/src/main/handoff/generator.ts):
  * handoff — это документ, который фиксирует ЧТО СДЕЛАНО + ТЕКУЩЕЕ СОСТОЯНИЕ +
  * СЛЕДУЮЩИЙ ШАГ, чтобы контекст переживал смену сессии / рантайма / краш.
- * Закрывает слабое место Verstak: «resume after crash» и длинные сессии
+ * Закрывает слабое место Grok Desktop: «resume after crash» и длинные сессии
  * (см. CLAUDE.md §5.4).
  *
  * Отличие от session-summary.ts: то резюме смотрит НАЗАД (одна строка факта в
@@ -155,7 +155,7 @@ function lastTurns(messages: ChatMessage[]): string[] {
  */
 export function generateHandoff(messages: ChatMessage[], opts: HandoffOptions = {}): string {
   const now = opts.now ?? Date.now()
-  const title = (opts.title ?? '').trim() || 'Сессия Verstak'
+  const title = (opts.title ?? '').trim() || 'Сессия Grok Desktop'
   const visible = messages.filter(m => m.role !== 'system')
 
   const files = extractFiles(messages)

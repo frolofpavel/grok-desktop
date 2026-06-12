@@ -189,7 +189,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'browser_navigate',
-    description: 'Открыть URL во встроенном браузере Verstak (вкладка Browser). Возвращает финальный URL после редиректов. Если пользователь не открыл вкладку Browser, инструмент вернёт ошибку — попроси открыть вкладку.',
+    description: 'Открыть URL во встроенном браузере Grok Desktop (вкладка Browser). Возвращает финальный URL после редиректов. Если пользователь не открыл вкладку Browser, инструмент вернёт ошибку — попроси открыть вкладку.',
     parameters: {
       type: 'object',
       properties: { url: { type: 'string', description: 'URL или поисковый запрос. Без схемы — будет добавлено https://.' } },
@@ -443,14 +443,14 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'screen_capture',
-    description: 'Делает скриншот экрана или активного окна Verstak. Скриншот прикрепляется к следующему сообщению как изображение — модели с vision увидят его и смогут проанализировать визуально. Используй для GUI-автоматизации, визуального анализа интерфейса или отладки.',
+    description: 'Делает скриншот экрана или активного окна Grok Desktop. Скриншот прикрепляется к следующему сообщению как изображение — модели с vision увидят его и смогут проанализировать визуально. Используй для GUI-автоматизации, визуального анализа интерфейса или отладки.',
     parameters: {
       type: 'object',
       properties: {
         target: {
           type: 'string',
           enum: ['screen', 'window'],
-          description: 'screen = весь экран (default), window = активное окно Verstak'
+          description: 'screen = весь экран (default), window = активное окно Grok Desktop'
         }
       },
       required: []

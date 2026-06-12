@@ -67,7 +67,7 @@ export function ProfilesTab() {
       <div className="gg-settings-section-title">Профили пользователей</div>
       <div className="gg-settings-hint" style={{ marginBottom: 14 }}>
         Каждый профиль — это роль с предустановленным провайдером/моделью/скиллами.
-        Полезно когда Verstak установлен у нескольких сотрудников агентства, или
+        Полезно когда Grok Desktop установлен у нескольких сотрудников агентства, или
         когда нужно переключаться между «owner» и «sales» режимами.
       </div>
 

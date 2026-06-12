@@ -1446,14 +1446,14 @@ const screenCaptureHandler: ToolHandler = {
         width = sz.width
         height = sz.height
       } else {
-        // window — захват окна Verstak через screen source
+        // window — захват окна Grok Desktop через screen source
         const primary = electronScreen.getPrimaryDisplay()
         const sources = await desktopCapturer.getSources({
           types: ['window'],
           thumbnailSize: { width: primary.size.width, height: primary.size.height }
         })
-        // Ищем окно Verstak по имени (title содержит 'Verstak' или 'Electron')
-        const win = sources.find(s => /verstak|electron/i.test(s.name)) ?? sources[0]
+        // Ищем окно Grok Desktop по имени (title содержит 'Grok Desktop' или 'Electron')
+        const win = sources.find(s => /grok desktop|electron/i.test(s.name)) ?? sources[0]
         if (!win) {
           return { id: call.id, name: call.name, result: 'Не найдено окно для захвата' }
         }

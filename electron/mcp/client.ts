@@ -127,7 +127,7 @@ export class McpClient extends EventEmitter {
       await this._request(conn, 'initialize', {
         protocolVersion: '2024-11-05',
         capabilities: {},
-        clientInfo: { name: 'Verstak', version: '1.2.0' }
+        clientInfo: { name: 'Grok Desktop', version: '0.1.0' }
       }, INIT_TIMEOUT_MS)
 
       // 2. notifications/initialized (no response expected)

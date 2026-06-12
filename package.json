@@ -1,7 +1,7 @@
 {
-  "name": "verstak",
-  "version": "1.3.0",
-  "description": "Desktop AI coding agent: 15+ model providers (API + CLI + local), full control & transparency, connectors, skills",
+  "name": "grok-desktop",
+  "version": "0.1.0",
+  "description": "Grok Desktop — AI coding agent for Grok (xAI): Grok API + Grok Build CLI, full control & transparency, skills, artifacts",
   "main": "out/main/main.mjs",
   "scripts": {
     "dev": "electron-vite dev",
@@ -21,8 +21,8 @@
     "dist:all": "npm run build && electron-builder --win --linux --mac"
   },
   "build": {
-    "appId": "ru.verstak.ide",
-    "productName": "Verstak",
+    "appId": "ru.grokdesktop.app",
+    "productName": "Grok Desktop",
     "copyright": "Copyright © 2026 Pavel Frolov",
     "directories": {
       "output": "release",
@@ -66,11 +66,11 @@
       "deleteAppDataOnUninstall": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Verstak",
-      "artifactName": "Verstak-Setup-${version}-${arch}.${ext}"
+      "shortcutName": "Grok Desktop",
+      "artifactName": "GrokDesktop-Setup-${version}-${arch}.${ext}"
     },
     "portable": {
-      "artifactName": "Verstak-Portable-${version}-${arch}.${ext}"
+      "artifactName": "GrokDesktop-Portable-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
@@ -91,11 +91,11 @@
     "publish": {
       "provider": "github",
       "owner": "frolofpavel",
-      "repo": "verstak"
+      "repo": "grok-desktop"
     }
   },
   "bin": {
-    "verstak": "./scripts/verstak-cli.mjs"
+    "grok-desktop": "./scripts/grok-desktop-cli.mjs"
   },
   "keywords": [],
   "author": "",

@@ -86,7 +86,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: verstak-${{ matrix.platform }}
+          name: grok-desktop-${{ matrix.platform }}
           path: |
             release/*.exe
             release/*.AppImage

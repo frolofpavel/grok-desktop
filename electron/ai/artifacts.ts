@@ -126,7 +126,7 @@ export async function generateDocx(
   }
 
   const doc = new Document({
-    creator: 'Verstak',
+    creator: 'Grok Desktop',
     sections: [{ properties: {}, children }]
   })
   const buf = await Packer.toBuffer(doc)

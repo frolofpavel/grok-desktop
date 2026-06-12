@@ -1,4 +1,4 @@
-# Security Notes — Verstak
+# Security Notes — Grok Desktop
 
 Честный список известных ограничений безопасности. Обновляется по мере закрытия.
 

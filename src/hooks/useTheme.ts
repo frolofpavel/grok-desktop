@@ -14,8 +14,8 @@ export interface ThemeMeta {
 
 /** Single source of truth for the picker. Colours mirror theme.css. */
 export const THEMES: ThemeMeta[] = [
-  { id: 'dark', label: 'Verstak Dark', light: false, swatch: ['#0a0b0d', '#16191d', '#5b8dff'] },
-  { id: 'light', label: 'Verstak Light', light: true, swatch: ['#ffffff', '#eef0f4', '#3a6ee8'] },
+  { id: 'dark', label: 'Grok Dark', light: false, swatch: ['#0a0b0d', '#16191d', '#5b8dff'] },
+  { id: 'light', label: 'Grok Light', light: true, swatch: ['#ffffff', '#eef0f4', '#3a6ee8'] },
   { id: 'dracula', label: 'Dracula', light: false, swatch: ['#21222c', '#282a36', '#bd93f9'] },
   { id: 'nord', label: 'Nord', light: false, swatch: ['#2e3440', '#3b4252', '#88c0d0'] },
   { id: 'tokyo-night', label: 'Tokyo Night', light: false, swatch: ['#1a1b26', '#24283b', '#7aa2f7'] },

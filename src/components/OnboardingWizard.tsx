@@ -120,7 +120,7 @@ export function OnboardingWizard({ onComplete }: Props) {
           {step === 1 && (
             <>
               <p className="gg-onboarding-text">
-                Verstak — AI-ассистент для разработки. Выбери свою роль для настройки под тебя.
+                Grok Desktop — AI-ассистент для разработки. Выбери свою роль для настройки под тебя.
               </p>
               <div className="gg-onboarding-field">
                 <label>Имя</label>
