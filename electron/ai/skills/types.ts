@@ -31,7 +31,7 @@ export interface SkillFrontmatter {
   /** Дефолтный agent mode (ask/accept-edits/plan/auto/bypass). */
   default_mode?: AgentMode
   /**
-   * Whitelist tools. Принимает glob-like (`gsheets.*`) или точное имя.
+   * Whitelist tools. Принимает glob-like (`github.*`) или точное имя.
    * Если пусто — разрешены все стандартные tools. Если задано — ТОЛЬКО эти.
    */
   tools_allow?: string[]

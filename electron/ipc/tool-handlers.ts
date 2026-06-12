@@ -468,8 +468,8 @@ const connectorQueryHandler: ToolHandler = {
       if (!cid) {
         return { id: call.id, name: call.name, result: '', error: 'connector_query: id обязателен' }
       }
-      // Mode policy: коннекторы трогают внешние системы (SSH, HTTP POST, Telegram,
-      // публикация), поэтому гейтятся как команда — plan блокирует, ask подтверждает,
+      // Mode policy: коннекторы трогают внешние системы (SSH, HTTP POST,
+      // GitHub write), поэтому гейтятся как команда — plan блокирует, ask подтверждает,
       // auto/bypass авто-принимают. Описание запроса показываем пользователю в модалке.
       const entity = call.args.entity ? ` · ${call.args.entity}` : ''
       const path = call.args.path ? ` · ${call.args.path}` : ''

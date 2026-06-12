@@ -29,7 +29,7 @@ export function registerSkillsIpc(registry: SkillRegistry, deps: RunLoadersDeps 
    *
    * trigger='chat_open' → запускаем loader'ы с runs_on='chat_open'.
    * trigger='slash_arg' → loader'ы которые ждут аргумент slash (например
-   * load_client_card для /my-skill my-client).
+   * load_today_brief).
    */
   ipcMain.handle('skills:run-loaders', async (_e, skillId: string, opts: { arg?: string; projectPath?: string | null; trigger: 'chat_open' | 'slash_arg' }) => {
     const skill = registry.get(skillId)

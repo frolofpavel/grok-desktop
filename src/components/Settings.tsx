@@ -7,9 +7,7 @@ import type { AutonomousStatus } from '../types/api'
 import { ProfilesTab } from './ProfilesTab'
 import { buildCatalog, connectionStatus, type ConnectionStatus } from '../lib/model-catalog'
 import {
-  Icon1C, IconGoogleSheets, IconTelegram,
-  IconSSH, IconBitrix, IconYandexDirect, IconYandexDisk,
-  IconSkillsServer, IconPlug, IconHTTP, IconGitHub, IconSocialPublish
+  IconSSH, IconSkillsServer, IconPlug, IconHTTP, IconGitHub
 } from './ConnectorIcons'
 import { useT } from '../i18n'
 import { classifyTool, classifyServer, type McpScope, type McpRisk } from '../lib/mcp-risk'
@@ -77,17 +75,10 @@ interface ConnectorDef {
 }
 
 const CONNECTORS: ConnectorDef[] = [
-  { id: 'onec', name: '1С OData', description: 'ERP-система, справочники, документы', icon: Icon1C, configuredKey: 'onec_base_url' },
   { id: 'http', name: 'HTTP API', description: 'Произвольные REST endpoints', icon: IconHTTP, configuredKey: '' },
-  { id: 'gsheets', name: 'Google Sheets', description: 'Таблицы, данные, отчёты', icon: IconGoogleSheets, configuredKey: 'gsheets_service_account_json' },
-  { id: 'telegram', name: 'Telegram', description: 'Бот для уведомлений и команд', icon: IconTelegram, configuredKey: 'telegram_bot_token' },
   { id: 'ssh', name: 'SSH', description: 'Удалённое выполнение команд', icon: IconSSH, configuredKey: 'ssh_default_host' },
-  { id: 'bitrix', name: 'Битрикс24', description: 'CRM, сделки, задачи', icon: IconBitrix, configuredKey: 'bitrix24_webhook_url' },
-  { id: 'ydirect', name: 'Яндекс.Директ', description: 'Рекламные кампании и отчёты', icon: IconYandexDirect, configuredKey: 'yandex_direct_token' },
-  { id: 'ydisk', name: 'Яндекс.Диск', description: 'Файлы и шеринг артефактов', icon: IconYandexDisk, configuredKey: 'yandex_disk_token' },
   { id: 'skills-server', name: 'Сервер скиллов', description: 'Удалённые AI-скиллы', icon: IconSkillsServer, configuredKey: 'skills_server_base' },
   { id: 'github', name: 'GitHub', description: 'Репозитории, issues, PR, code search', icon: IconGitHub, configuredKey: 'github_token' },
-  { id: 'social-publish', name: 'Social Publish', description: 'Постинг в Telegram, VK, webhooks', icon: IconSocialPublish, configuredKey: 'social_publish_telegram_channels' },
 ]
 
 // ─── MCP Tab ─────────────────────────────────────────────────────────────────
@@ -796,29 +787,17 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [models, setModels] = useState<Record<string, string>>({})
   const [enabledModels, setEnabledModels] = useState<Set<string>>(new Set())
   const [saved, setSaved] = useState(false)
-  const [onec, setOneC] = useState({ url: '', user: '', pass: '' })
   const [autonomous, setAutonomousState] = useState<AutonomousStatus>({
     enabled: false, intervalMin: 30, lastRunAt: null, lastRunSuggestions: 0, lastRunError: null, nextRunAt: null
   })
   const [httpEndpoints, setHttpEndpoints] = useState<Array<{ name: string; base: string; auth: string; paths: string }>>(
     [{ name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }, { name: '', base: '', auth: '', paths: '' }]
   )
-  // V3 — российские коннекторы (раздел 5 плана).
-  const [gsheetsJson, setGsheetsJson] = useState('')
-  const [telegramBotToken, setTelegramBotToken] = useState('')
-  const [telegramWhitelist, setTelegramWhitelist] = useState('')
+  // V3 — коннекторы (раздел 5 плана).
   const [sshHost, setSshHost] = useState('')
   const [sshKeyPath, setSshKeyPath] = useState('')
-  const [bitrixWebhook, setBitrixWebhook] = useState('')
-  const [yDirectToken, setYDirectToken] = useState('')
-  const [yDirectLogin, setYDirectLogin] = useState('')
   const [skillsServerBase, setSkillsServerBase] = useState('')
-  const [yDiskToken, setYDiskToken] = useState('')
   const [githubToken, setGithubToken] = useState('')
-  const [socialTgChannels, setSocialTgChannels] = useState('')
-  const [socialVkToken, setSocialVkToken] = useState('')
-  const [socialVkGroupId, setSocialVkGroupId] = useState('')
-  const [socialWebhooks, setSocialWebhooks] = useState('')
   const [costCap, setCostCap] = useState('')
   const [configuredConnectors, setConfiguredConnectors] = useState<Set<string>>(new Set())
   const [openConnector, setOpenConnector] = useState<string | null>(null)
@@ -857,11 +836,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
       }
       setKeys(keyVals)
       setModels(modelVals)
-      // 1С connector creds
-      const url = await window.api.settings.getKey('onec_base_url')
-      const user = await window.api.settings.getKey('onec_username')
-      const pass = await window.api.settings.getKey('onec_password')
-      setOneC({ url: url ?? '', user: user ?? '', pass: pass ?? '' })
       // HTTP endpoints
       const eps: typeof httpEndpoints = []
       for (let i = 1; i <= 4; i++) {
@@ -879,21 +853,10 @@ export function Settings({ onClose }: { onClose: () => void }) {
         setAutonomousState(st)
       } catch { /* ignore */ }
       // V3 коннекторы
-      setGsheetsJson((await window.api.settings.getKey('gsheets_service_account_json')) ?? '')
-      setTelegramBotToken((await window.api.settings.getKey('telegram_bot_token')) ?? '')
-      setTelegramWhitelist((await window.api.settings.getKey('telegram_chat_whitelist')) ?? '')
       setSshHost((await window.api.settings.getKey('ssh_default_host')) ?? '')
       setSshKeyPath((await window.api.settings.getKey('ssh_key_path')) ?? '')
-      setBitrixWebhook((await window.api.settings.getKey('bitrix24_webhook_url')) ?? '')
-      setYDirectToken((await window.api.settings.getKey('yandex_direct_token')) ?? '')
-      setYDirectLogin((await window.api.settings.getKey('yandex_direct_login')) ?? '')
       setSkillsServerBase((await window.api.settings.getKey('skills_server_base')) ?? '')
-      setYDiskToken((await window.api.settings.getKey('yandex_disk_token')) ?? '')
       setGithubToken((await window.api.settings.getKey('github_token')) ?? '')
-      setSocialTgChannels((await window.api.settings.getKey('social_publish_telegram_channels')) ?? '')
-      setSocialVkToken((await window.api.settings.getKey('social_publish_vk_token')) ?? '')
-      setSocialVkGroupId((await window.api.settings.getKey('social_publish_vk_group_id')) ?? '')
-      setSocialWebhooks((await window.api.settings.getKey('social_publish_webhooks')) ?? '')
       setCostCap((await window.api.settings.getKey('cost_cap_usd_per_session')) ?? '')
       setCurrentLang((await window.api.settings.getKey('app_language')) ?? 'en')
       // Какие модели «включены» в picker'е. Пусто = все.
@@ -983,9 +946,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
         await window.api.settings.setKey(`model_${p.id}`, models[p.id])
       }
     }
-    await window.api.settings.setKey('onec_base_url', onec.url)
-    await window.api.settings.setKey('onec_username', onec.user)
-    await window.api.settings.setKey('onec_password', onec.pass)
     for (let i = 0; i < httpEndpoints.length; i++) {
       const e = httpEndpoints[i]
       await window.api.settings.setKey(`http_endpoint_${i + 1}_name`,  e.name)
@@ -993,22 +953,11 @@ export function Settings({ onClose }: { onClose: () => void }) {
       await window.api.settings.setKey(`http_endpoint_${i + 1}_auth`,  e.auth)
       await window.api.settings.setKey(`http_endpoint_${i + 1}_paths`, e.paths)
     }
-    // V3 — российские коннекторы и server skills
-    await window.api.settings.setKey('gsheets_service_account_json', gsheetsJson)
-    await window.api.settings.setKey('telegram_bot_token', telegramBotToken)
-    await window.api.settings.setKey('telegram_chat_whitelist', telegramWhitelist)
+    // V3 — коннекторы и server skills
     await window.api.settings.setKey('ssh_default_host', sshHost)
     await window.api.settings.setKey('ssh_key_path', sshKeyPath)
-    await window.api.settings.setKey('bitrix24_webhook_url', bitrixWebhook)
-    await window.api.settings.setKey('yandex_direct_token', yDirectToken)
-    await window.api.settings.setKey('yandex_direct_login', yDirectLogin)
     await window.api.settings.setKey('skills_server_base', skillsServerBase)
-    await window.api.settings.setKey('yandex_disk_token', yDiskToken)
     await window.api.settings.setKey('github_token', githubToken)
-    await window.api.settings.setKey('social_publish_telegram_channels', socialTgChannels)
-    await window.api.settings.setKey('social_publish_vk_token', socialVkToken)
-    await window.api.settings.setKey('social_publish_vk_group_id', socialVkGroupId)
-    await window.api.settings.setKey('social_publish_webhooks', socialWebhooks)
     await window.api.settings.setKey('cost_cap_usd_per_session', costCap)
     await window.api.settings.setKey('enabled_models', JSON.stringify([...enabledModels]))
     setSaved(true)
@@ -1017,45 +966,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
 
   function renderConnectorForm(id: string): React.ReactNode {
     switch (id) {
-      case 'onec': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">1С OData base URL</label>
-            <input
-              className="gg-input"
-              value={onec.url}
-              onChange={e => setOneC(s => ({ ...s, url: e.target.value }))}
-              placeholder="https://1c.example.com/base/odata/standard.odata"
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Логин</label>
-            <input
-              className="gg-input"
-              value={onec.user}
-              onChange={e => setOneC(s => ({ ...s, user: e.target.value }))}
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Пароль</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={onec.pass}
-              onChange={e => setOneC(s => ({ ...s, pass: e.target.value }))}
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-hint">
-            Кред хранится зашифрованным в Electron safeStorage. AI может звать
-            tool <code>connector_query</code> с id=<code>onec</code>; пароль
-            никогда не попадает в промпт.
-          </div>
-        </>
-      )
       case 'http': return (
         <>
           {httpEndpoints.map((ep, i) => (
@@ -1095,57 +1005,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </div>
         </>
       )
-      case 'gsheets': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Service Account JSON</label>
-            <textarea
-              className="gg-input"
-              value={gsheetsJson}
-              onChange={e => setGsheetsJson(e.target.value)}
-              placeholder='{"type": "service_account", "client_email": "...", "private_key": "-----BEGIN PRIVATE KEY-----\\n...", ...}'
-              rows={5}
-              style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-hint">
-            JSON service account (как в <code>/opt/los/creds.json</code>). Шифруется через safeStorage.
-            AI вызывает <code>connector_query</code> с <code>id="gsheets"</code> и <code>op="read_as_records"</code> /
-            <code>"update_row"</code> / etc. См. electron/connectors/gsheets.ts.
-          </div>
-        </>
-      )
-      case 'telegram': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Bot token</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={telegramBotToken}
-              onChange={e => setTelegramBotToken(e.target.value)}
-              placeholder="1234567890:AAH... (от @BotFather)"
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Chat whitelist (JSON)</label>
-            <input
-              className="gg-input"
-              value={telegramWhitelist}
-              onChange={e => setTelegramWhitelist(e.target.value)}
-              placeholder='["-1003242936373", "@private_chat"]'
-              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-hint">
-            JSON-массив chat_id куда боту разрешено отправлять. Пустая строка = всем (только dev).
-            Rate limit 20 send/min на chat_id вшит в коннектор. Read истории — через SSH к Telethon скрипту.
-          </div>
-        </>
-      )
       case 'ssh': return (
         <>
           <div className="gg-settings-row">
@@ -1172,74 +1031,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
             Whitelist: только default host разрешён для запросов. Команды денилист:
             rm -rf системных корней, mkfs, dd на /dev, passwd, sudo su, systemctl stop, и т.п.
             Через connector_query с <code>id="ssh"</code> и <code>op="run_remote"</code>.
-          </div>
-        </>
-      )
-      case 'bitrix': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Incoming webhook URL</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={bitrixWebhook}
-              onChange={e => setBitrixWebhook(e.target.value)}
-              placeholder="https://your-portal.bitrix24.ru/rest/USER_ID/TOKEN/"
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-hint">
-            Создать в Битрикс24: Разработчикам → Другое → Входящий вебхук. Полный URL с токеном.
-            Denied methods: *.delete (crm.deal/lead/contact/company/user). Allowed prefixes: crm.*, tasks.*, user.*.
-          </div>
-        </>
-      )
-      case 'ydirect': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">OAuth token</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={yDirectToken}
-              onChange={e => setYDirectToken(e.target.value)}
-              placeholder="Получить: oauth.yandex.ru, scope: direct:api"
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Client-Login (опц.)</label>
-            <input
-              className="gg-input"
-              value={yDirectLogin}
-              onChange={e => setYDirectLogin(e.target.value)}
-              placeholder="Login клиента — для агентских аккаунтов"
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-hint">
-            Reports API асинхронный — connector polls до 30s. Если отчёт большой,
-            возвращается <code>processing: true</code>, повторяй запрос.
-          </div>
-        </>
-      )
-      case 'ydisk': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">OAuth token</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={yDiskToken}
-              onChange={e => setYDiskToken(e.target.value)}
-              placeholder="oauth.yandex.ru со scope cloud_api:disk.write"
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-hint">
-            Используется агентом для шеринга артефактов с клиентами:
-            upload_file → get_public_url → отправка ссылки в TG.
-            Загрузка идёт в <code>/Verstak/{`{дата}`}/</code> чтобы не засорять корень Диска.
           </div>
         </>
       )
@@ -1280,61 +1071,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
             Нужны scopes: <code>repo</code>, <code>read:org</code>. AI вызывает <code>connector_query</code> с{' '}
             <code>id="github"</code> и <code>op="list_repos"</code> / <code>"list_issues"</code> / etc.
             Хранится зашифрованным через safeStorage.
-          </div>
-        </>
-      )
-      case 'social-publish': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Telegram-каналы (JSON)</label>
-            <input
-              className="gg-input"
-              value={socialTgChannels}
-              onChange={e => setSocialTgChannels(e.target.value)}
-              placeholder='["-1001234567890", "@my_channel"]'
-              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-hint" style={{ marginBottom: 10 }}>
-            Переиспользует Bot token из коннектора Telegram (telegram_bot_token). Список chat_id куда постить.
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">VK token</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={socialVkToken}
-              onChange={e => setSocialVkToken(e.target.value)}
-              placeholder="User token со scope wall (vk.com/dev, oauth.vk.com)"
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">VK group ID</label>
-            <input
-              className="gg-input"
-              value={socialVkGroupId}
-              onChange={e => setSocialVkGroupId(e.target.value)}
-              placeholder="Числовой ID группы (без минуса), напр. 123456789"
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Webhooks (JSON)</label>
-            <input
-              className="gg-input"
-              value={socialWebhooks}
-              onChange={e => setSocialWebhooks(e.target.value)}
-              placeholder='["https://hooks.example.com/abc", "https://n8n.example.com/webhook/xyz"]'
-              style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-              spellCheck={false}
-            />
-          </div>
-          <div className="gg-settings-hint">
-            AI вызывает <code>connector_query</code> с <code>id="social-publish"</code> и
-            <code>op="publish_text"</code>, <code>text="..."</code>.
-            Опционально <code>platforms: ["telegram", "vk", "webhook"]</code> — если не передан, постит во всё настроенное.
           </div>
         </>
       )

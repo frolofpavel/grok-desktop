@@ -4,8 +4,7 @@
  *
  * Источник: V3 Plan раздел 8.
  *
- * Возвращает {path, kind, sizeBytes} — путь к файлу для preview pane или
- * для send_document через telegram коннектор.
+ * Возвращает {path, kind, sizeBytes} — путь к файлу для preview pane.
  */
 
 import { mkdir, writeFile } from 'fs/promises'

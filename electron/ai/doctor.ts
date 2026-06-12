@@ -41,16 +41,9 @@ export interface DoctorSettings {
  * (electron/connectors/*.ts). Для http проверяем первый endpoint.
  */
 const CONNECTOR_CHECKS: Array<{ id: string; name: string; key: string }> = [
-  { id: 'onec',           name: '1С:Предприятие (OData)', key: 'onec_base_url' },
-  { id: 'http',           name: 'HTTP API',                key: 'http_endpoint_1_base' },
-  { id: 'gsheets',        name: 'Google Sheets',           key: 'gsheets_service_account_json' },
-  { id: 'ssh',            name: 'SSH',                     key: 'ssh_default_host' },
-  { id: 'telegram',       name: 'Telegram Bot',            key: 'telegram_bot_token' },
-  { id: 'bitrix24',       name: 'Битрикс24',               key: 'bitrix24_webhook_url' },
-  { id: 'yandex_direct',  name: 'Я.Директ',                key: 'yandex_direct_token' },
-  { id: 'yandex_disk',    name: 'Я.Диск',                  key: 'yandex_disk_token' },
-  { id: 'github',         name: 'GitHub',                  key: 'github_token' },
-  { id: 'social-publish', name: 'Соц-публикация',          key: 'telegram_bot_token' }
+  { id: 'http',   name: 'HTTP API', key: 'http_endpoint_1_base' },
+  { id: 'ssh',    name: 'SSH',      key: 'ssh_default_host' },
+  { id: 'github', name: 'GitHub',   key: 'github_token' }
 ]
 
 /**

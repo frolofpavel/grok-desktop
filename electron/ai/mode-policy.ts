@@ -32,7 +32,7 @@ export type ToolDecision =
  * - read_file/list_directory/search_project/get_project_map/etc = always allowed
  *
  * connector_query гейтится как команда: коннекторы (SSH, HTTP POST/PUT/DELETE,
- * Telegram, Битрикс24, публикация) дают side-effects на внешних системах, поэтому
+ * GitHub write-операции) дают side-effects на внешних системах, поэтому
  * в plan-режиме («только чтение») они должны блокироваться, а в ask — подтверждаться.
  */
 export function decide(toolName: string, mode: AgentMode): ToolDecision {
@@ -54,7 +54,7 @@ export function decide(toolName: string, mode: AgentMode): ToolDecision {
 export function blockReason(toolName: string, mode: AgentMode): string {
   if (mode === 'plan') {
     if (toolName === 'connector_query') {
-      return `Активен режим "Режим планирования" — запросы к коннекторам (внешние системы: SSH, HTTP, Telegram, Битрикс24 и т.п.) запрещены, ` +
+      return `Активен режим "Режим планирования" — запросы к коннекторам (внешние системы: SSH, HTTP, GitHub и т.п.) запрещены, ` +
              `так как они могут менять состояние внешних систем. ` +
              `Сосредоточься на чтении кода (read_file, get_project_map, search_project) и составлении плана через create_plan. ` +
              `Пользователь сам переключит режим когда захочет выполнить запрос к коннектору.`

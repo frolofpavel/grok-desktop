@@ -189,7 +189,7 @@ export function OnboardingWizard({ onComplete }: Props) {
                 <li>🔑 API key: {apiKey ? '✓ задан' : '⚠ нужно ввести позже в Settings'}</li>
               </ul>
               <div className="gg-onboarding-hint">
-                Коннекторы (Google Sheets, Telegram, SSH и др.) — настраиваются в Settings по мере необходимости.
+                Коннекторы (HTTP API, SSH, GitHub) — настраиваются в Settings по мере необходимости.
               </div>
             </>
           )}

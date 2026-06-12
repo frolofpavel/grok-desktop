@@ -153,22 +153,18 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'list_connectors',
-    description: 'Перечислить внешние коннекторы (1С OData и т.п.) — что подключено, готово ли к работе. Возвращает массив { id, label, kind, status, detail }.',
+    description: 'Перечислить внешние коннекторы (HTTP API, SSH, GitHub) — что подключено, готово ли к работе. Возвращает массив { id, label, kind, status, detail }.',
     parameters: { type: 'object', properties: {} }
   },
   {
     name: 'connector_query',
-    description: 'Выполнить запрос к внешнему коннектору. Для 1С (id="onec") — entity + filter/select/top или metadata:true. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
+    description: 'Выполнить запрос к внешнему коннектору. Для HTTP (id="http") — endpoint + method + path + query/body/headers. Для SSH (id="ssh") — command (+ timeout). Для GitHub (id="github") — op и его аргументы (см. list_connectors). Креды и base URL берутся из настроек — НЕ передавай пароли в args.',
     parameters: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'ID коннектора: "onec" | "http".' },
-        // 1С OData params
-        entity: { type: 'string', description: '[onec] Имя OData-сущности, например "Catalog_Контрагенты".' },
-        filter: { type: 'string', description: '[onec] OData $filter.' },
-        select: { type: 'string', description: '[onec] Список полей через запятую.' },
-        top: { type: 'number', description: '[onec] Размер страницы 1..100.' },
-        metadata: { type: 'boolean', description: '[onec] Если true — вернёт $metadata.' },
+        id: { type: 'string', description: 'ID коннектора: "http" | "ssh" | "github".' },
+        // SSH params
+        command: { type: 'string', description: '[ssh] Команда для выполнения на удалённом хосте.' },
         // HTTP params
         endpoint: { type: 'string', description: '[http] Имя сконфигурированного эндпоинта.' },
         method: { type: 'string', description: '[http] GET/POST/PUT/DELETE/PATCH (default GET).' },

@@ -101,7 +101,7 @@ const PATTERNS: SecretPattern[] = [
   { name: 'stripe-key', re: /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{20,}\b/g },
   { name: 'jwt', re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
   { name: 'private-key-block', re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g },
-  // 1C-style basic auth in URLs (http://user:pass@host)
+  // Basic auth embedded in URLs (http://user:pass@host)
   { name: 'http-basic-auth', re: /\b(https?:\/\/)[^\s/:]+:[^\s/@]+@/g }
 ]
 

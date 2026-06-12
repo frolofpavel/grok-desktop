@@ -41,7 +41,7 @@ interface AiDeps {
   searchMemories: (projectPath: string, query: string, limit: number) => Array<{ id: string; type: string; content: string; tags: string[]; created_at: number }>
   /** Полнотекстовый поиск по истории разговоров проекта. */
   searchConversations: (projectPath: string, query: string, limit: number) => Array<{ session_id: number; role: string; content: string; created_at: number }>
-  /** Connector registry (list / query external services like 1C). */
+  /** Connector registry (list / query external services like HTTP API / SSH / GitHub). */
   connectors: {
     list: () => Array<{ id: string; label: string; kind: string; status: string; detail?: string }>
     query: (id: string, args: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>

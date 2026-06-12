@@ -1,27 +1,13 @@
 import type { Connector, ConnectorContext, ConnectorInfo } from './types'
-import { createOneCConnector } from './onec'
 import { createHttpConnector } from './http'
-import { createGSheetsConnector } from './gsheets'
 import { createSshConnector } from './ssh'
-import { createTelegramConnector } from './telegram'
-import { createBitrix24Connector } from './bitrix24'
-import { createYandexDirectConnector } from './yandex-direct'
-import { createYandexDiskConnector } from './yandex-disk'
 import { createGitHubConnector } from './github'
-import { createSocialPublishConnector } from './social-publish'
 
 // Built-in connectors. Adding a new adapter = register it here.
 const BUILTINS: Connector[] = [
-  createOneCConnector(),
   createHttpConnector(),
-  createGSheetsConnector(),
   createSshConnector(),
-  createTelegramConnector(),
-  createBitrix24Connector(),
-  createYandexDirectConnector(),
-  createYandexDiskConnector(),
-  createGitHubConnector(),
-  createSocialPublishConnector()
+  createGitHubConnector()
 ]
 
 export interface ConnectorRegistry {

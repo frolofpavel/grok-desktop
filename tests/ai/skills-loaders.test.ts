@@ -4,8 +4,6 @@ import { lookupLoader, listLoaders } from '../../electron/ai/skills/loaders'
 describe('skills/loaders registry', () => {
   it('listLoaders возвращает зарегистрированные имена', () => {
     const list = listLoaders()
-    expect(list).toContain('load_client_card')
-    expect(list).toContain('load_clients_list')
     expect(list).toContain('load_today_brief')
   })
 
@@ -28,24 +26,5 @@ describe('load_today_brief', () => {
     expect(result!.markdown).toMatch(/Сейчас/)
     expect(result!.markdown).toMatch(/(понедельник|вторник|среда|четверг|пятница|суббота|воскресенье)/)
     expect(result!.markdown).toMatch(/\d{4}/)  // год
-  })
-})
-
-describe('load_client_card без arg', () => {
-  it('возвращает подсказку про slug', async () => {
-    const fn = lookupLoader('load_client_card')!
-    const result = await fn({ projectPath: null })
-    expect(result).toBeTruthy()
-    expect(result!.markdown).toMatch(/slug/)
-    expect(result!.label).toBe('нет slug')
-  })
-})
-
-describe('load_client_card с несуществующим slug', () => {
-  it('возвращает дружелюбное not-found сообщение', async () => {
-    const fn = lookupLoader('load_client_card')!
-    const result = await fn({ projectPath: null, arg: 'no-such-client-xxxxx' })
-    expect(result).toBeTruthy()
-    expect(result!.markdown).toMatch(/не нашёл/)
   })
 })
