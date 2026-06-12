@@ -14,10 +14,10 @@ export function Terminal() {
       fontSize: 12,
       fontFamily: '"Geist Mono", "JetBrains Mono", "SF Mono", Menlo, monospace',
       theme: {
-        background: '#0a0b0d',
-        foreground: '#e6e8ec',
-        cursor: '#5b8dff',
-        selectionBackground: 'rgba(91, 141, 255, 0.25)'
+        background: '#0a0a0a',
+        foreground: '#ececec',
+        cursor: '#ffffff',
+        selectionBackground: 'rgba(255, 255, 255, 0.2)'
       }
     })
     const fit = new FitAddon()

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useT } from '../i18n'
 import type { Lang } from '../i18n'
-import authBgUrl from '../assets/auth-bg.webp'
-import authVideoUrl from '../assets/auth-bg.mp4'
+import { GrokLogo } from './GrokLogo'
 import type { DetectedCli } from '../types/api'
 
 /**
@@ -180,7 +179,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   if (langChosen === false) {
     return (
       <div className="gg-lang-picker">
-        <div className="gg-lang-picker-logo">G</div>
+        <div className="gg-lang-picker-logo"><GrokLogo size={30} /></div>
         <h1>Grok Desktop</h1>
         <p>Choose your language / Выберите язык</p>
         <div className="gg-lang-buttons">
@@ -201,26 +200,13 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
     <div className={`gg-auth-root${leaving ? ' is-leaving' : ''}`}>
       {/* ── Left panel: visual / animation ── */}
       <div className="gg-auth-left">
-        {/* Фоновое видео — Higgsfield Seedance 2.0 loop */}
-        <video
-          className="gg-auth-bg-video"
-          src={authVideoUrl}
-          autoPlay
-          loop
-          muted
-          playsInline
-          poster={authBgUrl}
-        />
-
-        {/* CSS orbs — fallback и подложка */}
-        <div className="gg-auth-orb gg-auth-orb-1" />
-        <div className="gg-auth-orb gg-auth-orb-2" />
-        <div className="gg-auth-orb gg-auth-orb-3" />
+        {/* Монохромный фон — чистый чёрный со сдержанным «космическим» свечением через CSS */}
+        <div className="gg-auth-space" />
 
         {/* Контент поверх */}
         <div className="gg-auth-left-content">
           <div className="gg-auth-logo-wrap">
-            <div className="gg-auth-logo-icon">G</div>
+            <div className="gg-auth-logo-icon"><GrokLogo size={26} /></div>
             <span className="gg-auth-logo-text">Grok Desktop</span>
           </div>
           <p className="gg-auth-tagline">{t.auth.tagline}</p>

@@ -1,0 +1,8 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Grok Desktop — фирменный знак: двойной диагональный штрих, белым по чёрному.
+       Источник истины для resources/icon.png (1024px) и src/assets/icon.png (512px).
+       Регенерация: node scripts/build-icon.mjs -->
+  <rect width="1024" height="1024" rx="224" fill="#000000"/>
+  <path d="M340 748 L700 260" stroke="#ffffff" stroke-width="92" stroke-linecap="round"/>
+  <path d="M568 748 L748 504" stroke="#ffffff" stroke-width="92" stroke-linecap="round"/>
+</svg>
