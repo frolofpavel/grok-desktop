@@ -8,17 +8,10 @@
  *    support multi-turn back-and-forth over a single stdin session. So we
  *    must serialize the conversation into the prompt itself.
  *
- * 2. claude-cli (Claude Code) is itself an agent with its own developed system
- *    prompt. Pasting our full SYSTEM_LAYER_PROMPT in front of theirs would
- *    create two regulations layered on top of each other — confusing the
- *    model and hurting answer quality. For claude-cli we send only the
- *    user_layer + context_pack + a short note that user_layer rules apply.
+ * 2. grok-cli (Grok Build) doesn't have an aggressive system prompt of its
+ *    own; we send the full system layer.
  *
- * 3. Other CLI providers (gemini-cli, grok-cli, codex-cli) don't have such an
- *    aggressive system prompt of their own; we send the full system layer
- *    there.
- *
- * 4. Attachments — CLI's `stream-json` mode doesn't accept inline images.
+ * 3. Attachments — CLI's `stream-json` mode doesn't accept inline images.
  *    We mention attachment names as a textual hint and let the user know.
  */
 
@@ -26,27 +19,14 @@ import { SYSTEM_LAYER_PROMPT } from './system-layer'
 import { prepareParts } from './compose-system'
 import type { ChatMessage } from './types'
 
-export type CliProviderId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
+export type CliProviderId = 'grok-cli'
 
 /**
  * True if the CLI provider reads this user_layer file by itself on startup.
- *
- * Audit 2026-05-21 (vop B, fix 3): we were always injecting user_layer into
- * the stdin payload, even though Claude Code reads CLAUDE.md, Codex reads
- * AGENTS.md, and Gemini CLI reads GEMINI.md natively. Result: rules sent
- * twice → extra tokens, occasional contradictions between our inline copy
- * and the file the CLI re-read on disk.
- *
- * Skip injection ONLY when the CLI is known to read THIS specific file. If
- * user_layer is RULES.md (our own), or e.g. AGENTS.md but provider is
- * claude-cli (Claude Code doesn't read AGENTS.md), we still inject.
+ * grok-cli — no documented convention file, always inject.
  */
 function cliReadsLayerNatively(providerId: CliProviderId, layerPath: string | null): boolean {
-  if (!layerPath) return false
-  if (providerId === 'claude-cli' && layerPath === 'CLAUDE.md') return true
-  if (providerId === 'codex-cli'  && layerPath === 'AGENTS.md') return true
-  if (providerId === 'gemini-cli' && layerPath === 'GEMINI.md') return true
-  // grok-cli — no documented convention file, always inject.
+  void providerId; void layerPath
   return false
 }
 
@@ -60,9 +40,7 @@ interface BuildCliPromptOpts {
    *  prepareParts, дописывается к user_layer. */
   projectSystemPrompt?: string | null
   /** Промпт активного скилла (специализация роли). Наслаивается секцией
-   *  <skill_layer> поверх system/user/context — как в API-пути. Раньше для CLI
-   *  терялся (приходил как role:system и фильтровался), поэтому Grok Build /
-   *  Codex / Gemini CLI не видели активный скилл. */
+   *  <skill_layer> поверх system/user/context — как в API-пути. */
   skillPrompt?: string | null
   /** Топ-5 воспоминаний проекта — те же что инжектятся API-провайдерам.
    *  Передаются в prepareParts → buildContextPack. */
@@ -92,30 +70,17 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
   })
   const trimmedUser = userLayer.content.trim()
   // Skip re-injecting user_layer when the CLI is known to read this exact file
-  // itself (Claude Code → CLAUDE.md, Codex → AGENTS.md, Gemini CLI → GEMINI.md).
-  // Otherwise we burn tokens twice and risk version drift between the inline
-  // copy and the file the CLI re-read from disk.
+  // itself. Otherwise we burn tokens twice and risk version drift between the
+  // inline copy and the file the CLI re-read from disk.
   const skipUserLayer = cliReadsLayerNatively(providerId, userLayer.path)
   const effectiveUserLayer = skipUserLayer ? '' : trimmedUser
   const nativeLayerHint = skipUserLayer
     ? `\n[gg-runtime: твой нативный ${userLayer.path} уже прочитан CLI на старте — не повторяю здесь.]`
     : ''
 
-  // 2. System envelope — provider-specific. claude-cli already runs Claude
-  //    Code with its own developed system prompt; layering ours on top creates
-  //    contradictory regs and hurts answers. Other CLIs (gemini/grok/codex)
-  //    are neutral, get the full system_layer.
-  if (providerId === 'claude-cli') {
-    if (effectiveUserLayer) {
-      sections.push(`<user_layer source="${userLayer.path}">
-${effectiveUserLayer}
-</user_layer>
-
-[gg-runtime: следуй регламентам из user_layer выше — они дополняют твой родной Claude Code system.]`)
-    } else if (nativeLayerHint) {
-      sections.push(nativeLayerHint.trim())
-    }
-  } else {
+  // 2. System envelope — grok-cli is neutral (no aggressive system prompt of
+  //    its own), gets the full system_layer.
+  {
     const userBlock = effectiveUserLayer
       ? `\n\n<user_layer source="${userLayer.path}">\n${effectiveUserLayer}\n</user_layer>`
       : nativeLayerHint
@@ -128,9 +93,7 @@ ${effectiveUserLayer}
 
   // 3.5. Skill layer — специализация роли агента (активный скилл). Наслаивается
   //      ПОВЕРХ system/user/context, как в API-пути (compose-prompt.ts
-  //      <skill_layer>). Применяется ко ВСЕМ CLI, включая claude-cli: это выбор
-  //      пользователя, а не наш базовый регламент. Закрывает gap, из-за которого
-  //      Grok Build / Codex / Gemini CLI не видели активный скилл.
+  //      <skill_layer>): это выбор пользователя, а не наш базовый регламент.
   const trimmedSkill = (skillPrompt ?? '').trim()
   if (trimmedSkill) sections.push(`<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
 

@@ -4,45 +4,14 @@ import { platform } from 'os'
 import { execFileSync } from 'child_process'
 
 export interface DetectedCli {
-  id: string           // 'claude-cli' | 'codex-cli' | 'gemini-cli' | 'grok-cli' | 'hermes' | 'aider'
-  name: string         // 'Claude Code' | 'Codex' | 'Gemini CLI' | 'Grok Build' | 'Hermes' | 'Aider'
+  id: string           // 'grok-cli' | 'hermes' | 'aider'
+  name: string         // 'Grok Build' | 'Hermes' | 'Aider'
   binary: string       // full path to binary
   version: string      // version string or 'unknown'
   status: 'ready' | 'found' | 'error'  // ready = works, found = binary exists but version check failed
 }
 
 const CLI_TOOLS = [
-  {
-    id: 'claude-cli',
-    name: 'Claude Code',
-    commands: ['claude'],
-    versionArg: '--version',
-    windowsPaths: (env: NodeJS.ProcessEnv) => [
-      env.APPDATA ? join(env.APPDATA, 'npm', 'claude.cmd') : '',
-      env.USERPROFILE ? join(env.USERPROFILE, '.local', 'bin', 'claude') : '',
-      env.USERPROFILE ? join(env.USERPROFILE, '.local', 'bin', 'claude.exe') : '',
-    ].filter(Boolean),
-  },
-  {
-    id: 'codex-cli',
-    name: 'Codex',
-    commands: ['codex'],
-    versionArg: '--version',
-    windowsPaths: (env: NodeJS.ProcessEnv) => [
-      env.APPDATA ? join(env.APPDATA, 'npm', 'codex.cmd') : '',
-      env.APPDATA ? join(env.APPDATA, 'npm', 'codex.ps1') : '',
-    ].filter(Boolean),
-  },
-  {
-    id: 'gemini-cli',
-    name: 'Gemini CLI',
-    commands: ['gemini'],
-    versionArg: '--version',
-    windowsPaths: (env: NodeJS.ProcessEnv) => [
-      env.APPDATA ? join(env.APPDATA, 'npm', 'gemini.cmd') : '',
-      env.USERPROFILE ? join(env.USERPROFILE, '.local', 'bin', 'gemini') : '',
-    ].filter(Boolean),
-  },
   {
     id: 'grok-cli',
     name: 'Grok Build',

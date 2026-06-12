@@ -15,14 +15,8 @@ import { Markdown } from './Markdown'
  */
 
 const PROVIDER_LABELS: Record<string, string> = {
-  'gemini-api': 'Gemini',
-  'gemini-cli': 'Gemini CLI',
-  'claude': 'Claude',
-  'claude-cli': 'Claude Code',
   'grok': 'Grok',
   'grok-cli': 'Grok Build',
-  'openai': 'OpenAI',
-  'codex-cli': 'Codex'
 }
 
 export function ReviewPills() {

@@ -154,8 +154,8 @@ interface CreateProps {
 function CreateProfileForm({ onCancel, onCreated }: CreateProps) {
   const [name, setName] = useState('')
   const [role, setRole] = useState('')
-  const [provider, setProvider] = useState('claude-cli')
-  const [model, setModel] = useState('claude-sonnet-4-6')
+  const [provider, setProvider] = useState('grok')
+  const [model, setModel] = useState('grok-4')
   const [busy, setBusy] = useState(false)
 
   async function submit() {
@@ -195,14 +195,14 @@ function CreateProfileForm({ onCancel, onCreated }: CreateProps) {
       <input
         type="text"
         className="gg-input"
-        placeholder="Default provider (claude-cli / claude / gemini-api / grok / openai / codex-cli)"
+        placeholder="Default provider (grok / grok-cli)"
         value={provider}
         onChange={e => setProvider(e.target.value)}
       />
       <input
         type="text"
         className="gg-input"
-        placeholder="Default model (например claude-sonnet-4-6)"
+        placeholder="Default model (например grok-4)"
         value={model}
         onChange={e => setModel(e.target.value)}
       />

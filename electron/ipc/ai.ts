@@ -16,8 +16,6 @@ import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
 import { captureToolObservation } from '../ai/memory-hooks'
 import { trackToolForPatterns, type ToolEvent } from '../ai/procedural-memory'
-import { pickReviewProvider, buildCrossVerifyPrompt, runCrossVerify, getConfiguredApiProviders, type TurnChange } from '../ai/cross-verify'
-import { shouldFallback, getNextFallback } from '../ai/smart-fallback'
 import { estimateComplexity, recommendModel, complexityLabel } from '../ai/smart-router'
 import { type ExitReason, callSignature, detectVerifyScriptsForHint, writeSessionJournal } from '../ai/session-journal'
 
@@ -121,43 +119,6 @@ const pendingCommands = new Map<string, PendingCommand>()
 
 function scopedKey(sendId: number, callId: string): string {
   return `${sendId}::${callId}`
-}
-
-/**
- * Fire-and-forget: запускаем кросс-верификацию асинхронно после done.
- * Никогда не бросает — любые ошибки логируем и тихо игнорируем.
- * Результат приходит как cross-verify event ПОСЛЕ done основного ответа.
- */
-function fireCrossVerify(
-  sender: TaggedSender,
-  sendId: number,
-  changes: TurnChange[],
-  currentProviderId: ProviderId | undefined,
-  getSecret: (key: string) => string | null
-): void {
-  if (!changes.length) return
-  if (!currentProviderId) return
-  // Проверяем настройку cross_verify (по умолчанию включена)
-  if (getSecret('cross_verify') === 'false') return
-
-  // Асинхронно, не блокируем
-  void (async () => {
-    try {
-      const configured = getConfiguredApiProviders(getSecret)
-      const reviewProviderId = pickReviewProvider(currentProviderId, configured)
-      if (!reviewProviderId) return  // только 1 провайдер — пропускаем
-
-      const prompt = buildCrossVerifyPrompt(changes)
-      const cvResult = await runCrossVerify(reviewProviderId, prompt, getSecret)
-
-      sender.send('ai:event', {
-        id: sendId,
-        event: { type: 'cross-verify', result: cvResult.result, provider: cvResult.provider, ok: cvResult.ok }
-      })
-    } catch (err) {
-      console.warn('[cross-verify] unexpected error:', err instanceof Error ? err.message : err)
-    }
-  })()
 }
 
 export function registerAiIpc(deps: AiDeps): void {
@@ -400,31 +361,6 @@ export function registerAiIpc(deps: AiDeps): void {
 
     let provider: ChatProvider
     try {
-      // Claude Code OAuth token (из `claude setup-token`) — для headless+Max.
-      // Если задан в settings, передаётся как env var дочернему claude процессу.
-      const claudeOauthToken = providerId === 'claude-cli'
-        ? deps.getSecret('claude_code_oauth_token')
-        : null
-      // custom-openai: baseUrl + список моделей задаются юзером в Settings.
-      // models приходят как comma-separated string; парсим в массив.
-      let customBaseUrl: string | undefined
-      let customModels: string[] | undefined
-      if (providerId === 'custom-openai') {
-        customBaseUrl = deps.getSecret('custom_openai_baseurl') ?? undefined
-        const modelsRaw = deps.getSecret('custom_openai_models')
-        if (modelsRaw) {
-          customModels = modelsRaw.split(',').map(s => s.trim()).filter(Boolean)
-        }
-      }
-      // YandexGPT и GigaChat имеют по второму секрету: yandex_folder_id и
-      // gigachat_client_secret. Они хранятся отдельно в SafeStorage и
-      // пробрасываются в registry.createProvider() через extension options.
-      const yandexFolderId = providerId === 'yandex-gpt'
-        ? (deps.getSecret('yandex_folder_id') ?? undefined)
-        : undefined
-      const gigachatClientSecret = providerId === 'gigachat'
-        ? (deps.getSecret('gigachat_client_secret') ?? undefined)
-        : undefined
       provider = createProvider(providerId, {
         apiKey,
         model,
@@ -432,11 +368,6 @@ export function registerAiIpc(deps: AiDeps): void {
         signal: ctrl.signal,
         projectSystemPrompt: projectSystemPromptForProvider,
         skillPrompt: skillPromptForProvider,
-        claudeOauthToken,
-        customBaseUrl,
-        customModels,
-        yandexFolderId,
-        gigachatClientSecret,
         memories: descriptor.transport === 'CLI' ? memories : undefined,
         effortLevel: overrides?.effortLevel,
         agentMode: deps.getAgentMode()
@@ -460,36 +391,6 @@ export function registerAiIpc(deps: AiDeps): void {
     // Force-plain path: review uses no tools regardless of provider capability.
     const useToolsPath = !overrides?.noTools && descriptor.supportsTools && projectPath
 
-    // Smart fallback: при ошибке (429/5xx/сеть) пробуем следующего провайдера.
-    // Только если smart_fallback не отключён явно, только для API-провайдеров,
-    // только без reviewer override (ревьюер работает в изоляции).
-    const smartFallbackEnabled = deps.getSecret('smart_fallback') !== 'false'
-      && descriptor.transport === 'API'
-      && !overrides?.providerId  // не задействуем fallback в Explicit Review
-
-    /** Создаёт провайдера для fallback-кандидата с теми же опциями. */
-    function makeFallbackProvider(fallbackId: ProviderId): ChatProvider | null {
-      const fallbackDesc = PROVIDERS[fallbackId]
-      if (!fallbackDesc) return null
-      const fallbackKey = fallbackDesc.secretKey ? deps.getSecret(fallbackDesc.secretKey) : null
-      if (fallbackDesc.secretKey && !fallbackKey) return null
-      const fallbackModel = deps.getProviderModel(fallbackId) ?? fallbackDesc.defaultModel
-      try {
-        return createProvider(fallbackId, {
-          apiKey: fallbackKey,
-          model: fallbackModel,
-          cwd: projectPath ?? process.cwd(),
-          signal: ctrl.signal,
-          projectSystemPrompt: projectSystemPromptForProvider,
-          skillPrompt: skillPromptForProvider,
-          effortLevel: overrides?.effortLevel,
-          agentMode: deps.getAgentMode()
-        })
-      } catch {
-        return null
-      }
-    }
-
     if (useToolsPath) {
       const tools = createFileTools(projectPath, ctrl.signal)
       const turnsBudget = Math.min(MAX_BUDGET_TURNS, Math.max(DEFAULT_AGENT_TURNS, budget ?? DEFAULT_AGENT_TURNS))
@@ -505,15 +406,12 @@ export function registerAiIpc(deps: AiDeps): void {
       // (и сохраняет совместимость с эвристикой session_start для легаси-строк).
       if (auditFn) auditFn('session_start', JSON.stringify({ runId, sendId }))
       void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.searchMemories, deps.searchConversations, deps.connectors, deps.getAgentMode(), turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined,
         deps.mcpClient,
         auditFn,
         deps.trackToolPattern
       ).finally(cleanup)
     } else {
-      void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model,
-        smartFallbackEnabled ? { getNextProvider: makeFallbackProvider, configuredProviders: new Set(getConfiguredApiProviders(deps.getSecret)), triedProviders: new Set([providerId]) } : undefined
-      ).finally(cleanup)
+      void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model).finally(cleanup)
     }
     return sendId
   })
@@ -569,57 +467,9 @@ export function registerAiIpc(deps: AiDeps): void {
     const providerId = deps.getProviderId()
     const descriptor = PROVIDERS[providerId]
     const apiKey = descriptor.secretKey ? deps.getSecret(descriptor.secretKey) : null
-    // No API key or CLI provider — fall back to a rough heuristic (~4 chars/token)
-    if (!apiKey || descriptor.transport !== 'API') {
-      const rough = Math.ceil((text?.length ?? 0) / 4)
-      return { tokens: rough, exact: false, providerId }
-    }
-    try {
-      // Currently we have a true countTokens path only for Gemini API. Others
-      // use the heuristic — extend as we add adapters.
-      if (providerId === 'gemini-api') {
-        const { GoogleGenAI } = await import('@google/genai')
-        const client = new GoogleGenAI({ apiKey })
-        const model = deps.getProviderModel(providerId) ?? descriptor.defaultModel
-        // Same compose path as ai:send — keeps countTokens estimate aligned
-        // with what actually gets sent on the next ai:send.
-        // Build the FULL context the next ai:send would see: system + history
-        // + draft text. Without history the estimate could be off by orders of
-        // magnitude on long conversations (50+ msgs → ~20k tokens of history).
-        const history = Array.isArray(historyMessages) ? historyMessages : []
-        // Include memories so the token count matches what ai:send actually sends.
-        let countTokensMemories: { type: string; content: string; tags: string[] }[] = []
-        if (projectPath) {
-          try {
-            countTokensMemories = deps.searchMemories(projectPath, '', 5)
-          } catch { /* ignore — token count stays a bit low rather than throwing */ }
-        }
-        const composed = await prepareSystemContext({
-          projectPath,
-          messages: history,
-          recentWrites: projectPath ? deps.recentWrites(projectPath, 8) : [],
-          memories: countTokensMemories
-        })
-        // Full context size: system + every prior turn + the draft text.
-        const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [
-          { role: 'user', parts: [{ text: composed.system }] }
-        ]
-        for (const m of history) {
-          if (m.role === 'system') continue  // already in composed.system
-          contents.push({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content ?? '' }]
-          })
-        }
-        if (text) contents.push({ role: 'user', parts: [{ text }] })
-        const res = await (client.models as unknown as {
-          countTokens: (opts: { model: string; contents: typeof contents }) => Promise<{ totalTokens?: number }>
-        }).countTokens({ model, contents })
-        return { tokens: res.totalTokens ?? 0, exact: true, providerId }
-      }
-    } catch (err) {
-      console.error('[count-tokens]', err instanceof Error ? err.message : err)
-    }
+    // xAI не даёт публичного countTokens API — везде грубая эвристика
+    // (~4 chars/token). historyMessages принимаем для совместимости контракта.
+    void apiKey; void projectPath; void historyMessages
     return { tokens: Math.ceil((text?.length ?? 0) / 4), exact: false, providerId }
   })
 
@@ -638,19 +488,6 @@ export function registerAiIpc(deps: AiDeps): void {
     }
   })
 }
-
-/** Опции smart fallback — пробрасываются из ai:send в conversation runners. */
-interface FallbackOpts {
-  /** Создаёт провайдера для указанного fallback-кандидата (null если нет ключа). */
-  getNextProvider: (id: ProviderId) => ChatProvider | null
-  /** Провайдеры с настроенными ключами. */
-  configuredProviders: Set<ProviderId>
-  /** Уже попробованные провайдеры (мутируется по ходу). */
-  triedProviders: Set<ProviderId>
-}
-
-/** Максимальное количество fallback-попыток (original + 2 alternates). */
-const MAX_FALLBACK_ATTEMPTS = 2
 
 /**
  * Plain streaming conversation — no tools, no multi-turn. Used for providers
@@ -673,8 +510,7 @@ async function runPlainConversation(
   recordJournal: AiDeps['recordJournal'],
   costGuard?: ReturnType<typeof createCostGuard>,
   providerId?: ProviderId,
-  model?: string,
-  fallbackOpts?: FallbackOpts
+  model?: string
 ): Promise<void> {
   let lastAssistantText = ''
   const sessionUsage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } = {
@@ -718,23 +554,6 @@ async function runPlainConversation(
     }
     sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } catch (err) {
-    // Smart fallback: если ошибка retriable и есть ещё кандидаты — пробуем.
-    if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
-      fallbackOpts.triedProviders.add(providerId)
-      if (shouldFallback(err)) {
-        const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
-        const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
-        if (nextProvider && nextId) {
-          console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
-          sender.send('ai:event', {
-            id: sendId,
-            event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` }
-          })
-          fallbackOpts.triedProviders.add(nextId)
-          return runPlainConversation(sender, sendId, nextProvider, projectPath, messages, signal, recordJournal, costGuard, nextId, model, fallbackOpts)
-        }
-      }
-    }
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,
@@ -799,7 +618,6 @@ async function runApiConversation(
   costGuard?: ReturnType<typeof createCostGuard>,
   providerId?: ProviderId,
   model?: string,
-  fallbackOpts?: FallbackOpts,
   mcpClientRef?: McpClient,
   appendAuditFn?: (action: string, detail: string) => void,
   trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void
@@ -818,8 +636,6 @@ async function runApiConversation(
   // Tally tool activity over the whole session so we can write one journal summary at the end.
   const filesTouched = new Set<string>()
   const commandsRun: string[] = []
-  // Cross-verify: накапливаем изменённые файлы с контентом для ревью другим провайдером.
-  const sessionChanges: TurnChange[] = []
   let lastAssistantText = ''
   // Attachments collected from browser_screenshot etc. — flushed into the
   // next user message so vision-capable providers see them.
@@ -916,9 +732,6 @@ async function runApiConversation(
         if (toolCalls.length === 0) {
           exitReason = 'completed'
           sender.send('ai:event', { id: sendId, event })
-          // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done,
-          // чтобы не блокировать UI. Результат придёт отдельным событием.
-          if (getSecretForDelegate) fireCrossVerify(sender, sendId, sessionChanges, providerId, getSecretForDelegate)
           return
         }
       } else if (event.type === 'error') {
@@ -930,8 +743,6 @@ async function runApiConversation(
     if (toolCalls.length === 0) {
       exitReason = 'completed'
       sender.send('ai:event', { id: sendId, event: { type: 'done' } })
-      // Cross-verify: запускаем асинхронно ПОСЛЕ отправки done.
-      if (getSecretForDelegate) fireCrossVerify(sender, sendId, sessionChanges, providerId, getSecretForDelegate)
       return
     }
 
@@ -1040,14 +851,7 @@ async function runApiConversation(
       if (!result) continue
       if ((call.name === 'write_file' || call.name === 'apply_patch') && !result.error) {
         const p = String(call.args.path ?? '')
-        if (p) {
-          filesTouched.add(p)
-          // Track content for cross-verify (write_file has 'content', apply_patch has 'patch')
-          const content = String(call.args.content ?? call.args.patch ?? '')
-          if (content && sessionChanges.length < 5) {
-            sessionChanges.push({ file: p, type: call.name === 'write_file' ? 'write' : 'patch', content })
-          }
-        }
+        if (p) filesTouched.add(p)
         acceptedWritesThisTurn++
       } else if (call.name === 'run_command' && !result.error) {
         const cmd = String(call.args.command ?? '')
@@ -1155,26 +959,6 @@ async function runApiConversation(
   })
   sender.send('ai:event', { id: sendId, event: { type: 'done' } })
   } catch (err) {
-    // Smart fallback для API-агентного пути: если withInitialRetry исчерпал
-    // попытки и ошибка всё ещё retriable — переключаемся на следующего провайдера.
-    if (fallbackOpts && providerId && (fallbackOpts.triedProviders.size - 1) < MAX_FALLBACK_ATTEMPTS) {
-      fallbackOpts.triedProviders.add(providerId)
-      if (shouldFallback(err)) {
-        const nextId = getNextFallback(providerId, fallbackOpts.triedProviders, fallbackOpts.configuredProviders)
-        const nextProvider = nextId ? fallbackOpts.getNextProvider(nextId) : null
-        if (nextProvider && nextId) {
-          console.log(`[fallback] ${providerId} failed: ${err instanceof Error ? err.message : String(err)}. Trying ${nextId}...`)
-          sender.send('ai:event', {
-            id: sendId,
-            event: { type: 'info', text: `⚡ ${providerId} недоступен, переключаюсь на ${nextId}` }
-          })
-          fallbackOpts.triedProviders.add(nextId)
-          // Передаём tools из замыкания — они привязаны к projectPath и signal, не к провайдеру.
-          const fallbackTools = createFileTools(projectPath, signal)
-          return runApiConversation(sender, sendId, nextProvider, fallbackTools, projectPath, initialMessages, signal, recordWrite, recordPlan, recordJournal, readJournal, saveMemory, searchMemories, searchConversations, connectors, agentMode, turnsBudget, skillRegistry, getSecretForDelegate, costGuard, nextId, model, fallbackOpts, mcpClientRef, appendAuditFn, trackToolPatternFn)
-        }
-      }
-    }
     exitReason = 'crashed'
     sender.send('ai:event', {
       id: sendId,

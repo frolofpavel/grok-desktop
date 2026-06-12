@@ -129,14 +129,8 @@ function ChatNavSection() {
 
 /** 2-3 letter tag shown next to chat session name when it has a saved provider. */
 function shortProviderTag(id: string): string {
-  if (id === 'gemini-api') return 'GMN'
-  if (id === 'gemini-cli') return 'ULT'
-  if (id === 'claude') return 'CLD'
-  if (id === 'claude-cli') return 'CC'
   if (id === 'grok') return 'GRK'
   if (id === 'grok-cli') return 'GB'
-  if (id === 'openai') return 'GPT'
-  if (id === 'codex-cli') return 'CDX'
   return id.slice(0, 3).toUpperCase()
 }
 
@@ -373,7 +367,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
 
       <div className="gg-sidebar-footer">
         <div className="gg-provider-badge">
-          <span className={`gg-provider-dot ${provider.id === 'gemini-cli' ? 'cli' : ''}`} />
+          <span className={`gg-provider-dot ${provider.transport === 'CLI' ? 'cli' : ''}`} />
           <span>{provider.label} · {provider.transport}</span>
         </div>
         <button className="gg-settings-trigger" onClick={onOpenSettings} title={t.settings.title}>⚙</button>

@@ -187,9 +187,6 @@ app.whenReady().then(() => {
   const settings = createSettings(db, safeStorage)
 
   const ENV_MAP: Record<string, string> = {
-    gemini_api_key: 'GEMINI_API_KEY',
-    anthropic_api_key: 'ANTHROPIC_API_KEY',
-    openai_api_key: 'OPENAI_API_KEY',
     xai_api_key: 'XAI_API_KEY',
   }
   const getSecret = (key: string): string | null => {
@@ -200,7 +197,7 @@ app.whenReady().then(() => {
   const getProviderId = (): ProviderId => {
     const v = settings.getSecret('provider')
     if (v && v in PROVIDERS) return v as ProviderId
-    return 'gemini-api'
+    return 'grok'
   }
   const getProviderModel = (id: ProviderId): string | null => settings.getSecret(`model_${id}`)
   const getAgentMode = () => {
@@ -234,7 +231,7 @@ app.whenReady().then(() => {
   registerProjectIpc(projects)
   registerFilesIpc({ getProjectRoot: getActiveProjectPath })
   registerSettingsIpc(settings)
-  registerCliAuthIpc(settings)
+  registerCliAuthIpc()
   registerAiIpc({
     getSecret,
     getProviderId,

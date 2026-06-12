@@ -78,7 +78,6 @@ export type ChatEvent =
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx'; filename: string; path: string; sizeBytes: number }
   | { type: 'usage'; usage: UsageDelta }
   | { type: 'info'; text: string }
-  | { type: 'cross-verify'; result: string; provider: string; ok: boolean }
   | { type: 'done' }
   | { type: 'error'; message: string }
 
@@ -109,10 +108,6 @@ declare global {
       }
       doctor: {
         run: () => Promise<DoctorReport>
-      }
-      router: {
-        /** Рекомендует тир+провайдера+модель под текст задачи. null = нет подходящего. */
-        recommend: (taskText: string) => Promise<TierRecommendation | null>
       }
       policy: {
         /** Снимок политики разрешений агента: матрица decide() × режимы + опасные команды. */
@@ -206,7 +201,7 @@ declare global {
           message?: string
           command?: string
         }>
-        statusAll: () => Promise<Record<'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli', {
+        statusAll: () => Promise<Record<'grok-cli', {
           installed: boolean
           loggedIn: boolean
           credPath?: string
@@ -266,9 +261,6 @@ declare global {
       }
       cli: {
         detect(): Promise<DetectedCli[]>
-      }
-      localModels: {
-        scan(): Promise<DetectedLocalServer[]>
       }
       updater: {
         install(): Promise<void>
@@ -342,15 +334,6 @@ export interface DetectedCli {
   binary: string
   version: string
   status: 'ready' | 'found' | 'error'
-}
-
-/** Локальный OpenAI-compatible сервер моделей, найденный на компьютере. */
-export interface DetectedLocalServer {
-  id: 'ollama' | 'lmstudio' | 'llamacpp' | 'jan'
-  name: string
-  baseUrl: string
-  running: boolean
-  models: string[]
 }
 
 /** MCP Server — конфигурация внешнего MCP-сервера. */
@@ -440,16 +423,6 @@ export interface DoctorReport {
   providers: DoctorItem[]
   connectors: DoctorItem[]
   summary: { okCount: number; problemCount: number }
-}
-
-/** Tier Router — рекомендация тира+провайдера+модели (см. electron/ai/tier-router.ts). */
-export type ModelTier = 'cheap' | 'frontier' | 'private'
-export interface TierRecommendation {
-  tier: ModelTier
-  providerId: string
-  model: string
-  /** Человекочитаемое обоснование выбора (tooltip). */
-  reason: string
 }
 
 /** Policy Center — снимок политики разрешений агента (см. electron/ipc/settings.ts). */

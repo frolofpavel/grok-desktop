@@ -18,14 +18,8 @@ import { composeReviewPayload } from '../lib/compose-review-payload'
  */
 
 const PROVIDER_LABELS: Record<string, string> = {
-  'gemini-api': 'Gemini (API)',
-  'gemini-cli': 'Gemini CLI',
-  'claude': 'Claude (API)',
-  'claude-cli': 'Claude Code',
   'grok': 'Grok (API)',
-  'grok-cli': 'Grok Build',
-  'openai': 'OpenAI',
-  'codex-cli': 'Codex'
+  'grok-cli': 'Grok Build'
 }
 const KNOWN_PROVIDERS = Object.keys(PROVIDER_LABELS)
 
@@ -83,11 +77,9 @@ export function ReviewButton() {
     // считаем доступным всегда (CLI сам ругнётся если бинарь не установлен —
     // мы это обработаем через sendId=0 в startReview).
     if (defaultReviewer) {
-      const needsKey = defaultReviewer.endsWith('-api') ||
-                       ['claude', 'grok', 'openai'].includes(defaultReviewer)
+      const needsKey = defaultReviewer === 'grok'
       if (needsKey) {
-        const keyName = `${defaultReviewer.replace('-api', '')}_api_key`
-        const key = await window.api.settings.getKey(keyName)
+        const key = await window.api.settings.getKey('xai_api_key')
         if (!key) {
           setPickerOpen(true)
           return

@@ -504,7 +504,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     // Per-chat provider: if the session has providerId / model saved, apply
     // them to the global settings so the next ai:send uses that provider.
     // Sanity check: if stored (providerId, model) pair is invalid (e.g. older
-    // bug saved gemini's model on a claude session), drop the model so
+    // bug saved another provider's model on this session), drop the model so
     // useProvider falls back to the provider's default.
     const session = s.chatSessions.find(c => c.id === id)
     if (session?.providerId) {
@@ -631,8 +631,8 @@ export const useProject = create<ProjectState>((set, get) => ({
     const s = get()
     if (!s.path) return null
     // Inherit the currently-selected provider/model so a new chat doesn't
-    // reset back to gemini-api when user is e.g. in the middle of working
-    // with Claude.
+    // reset back to default provider when user is e.g. in the middle of
+    // working in another chat.
     const currentProvider = await window.api.settings.getKey('provider')
     const currentModel = currentProvider ? await window.api.settings.getKey(`model_${currentProvider}`) : null
     const created = await window.api.chatSessions.create(s.path, {

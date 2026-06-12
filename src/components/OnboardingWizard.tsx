@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
  *
  * Шаги:
  *  1. Привет — кто ты? (имя + роль)
- *  2. API key Anthropic (минимально один; остальные опционально)
+ *  2. API key xAI (Grok)
  *  3. Готово — открывается главный экран
  *
  * Триггер: при старте App.tsx проверяется settings.getKey('onboarding_completed').
@@ -22,10 +22,10 @@ interface Props {
 type Role = 'developer' | 'designer' | 'manager' | 'student'
 
 const ROLE_PRESETS: Record<Role, { label: string; defaultProvider: string; defaultModel: string; skills: string[] }> = {
-  developer: { label: 'Developer',         defaultProvider: 'gemini-api', defaultModel: 'gemini-2.5-flash', skills: ['code-review', 'git-summary', 'explain-code'] },
-  designer:  { label: 'Designer',          defaultProvider: 'gemini-api', defaultModel: 'gemini-2.5-flash', skills: ['explain-code'] },
-  manager:   { label: 'Project Manager',   defaultProvider: 'gemini-api', defaultModel: 'gemini-2.5-flash', skills: ['git-summary'] },
-  student:   { label: 'Student',           defaultProvider: 'gemini-api', defaultModel: 'gemini-2.5-flash', skills: ['explain-code'] }
+  developer: { label: 'Developer',         defaultProvider: 'grok', defaultModel: 'grok-4', skills: ['code-review', 'git-summary', 'explain-code'] },
+  designer:  { label: 'Designer',          defaultProvider: 'grok', defaultModel: 'grok-4-fast', skills: ['explain-code'] },
+  manager:   { label: 'Project Manager',   defaultProvider: 'grok', defaultModel: 'grok-4-fast', skills: ['git-summary'] },
+  student:   { label: 'Student',           defaultProvider: 'grok', defaultModel: 'grok-4-fast', skills: ['explain-code'] }
 }
 
 export function OnboardingWizard({ onComplete }: Props) {
@@ -64,7 +64,7 @@ export function OnboardingWizard({ onComplete }: Props) {
 
       // 2) Сохраняем API key (если введён)
       if (apiKey.trim()) {
-        await window.api.settings.setKey('anthropic_api_key', apiKey.trim())
+        await window.api.settings.setKey('xai_api_key', apiKey.trim())
       }
 
       // 3) Применяем default provider/model к settings
@@ -111,7 +111,7 @@ export function OnboardingWizard({ onComplete }: Props) {
           <span className="gg-onboarding-step">Шаг {step} из 3</span>
           <h2 className="gg-onboarding-title">
             {step === 1 && 'Привет! Как тебя зовут?'}
-            {step === 2 && 'API key Anthropic'}
+            {step === 2 && 'API key xAI (Grok)'}
             {step === 3 && 'Готово'}
           </h2>
         </div>
@@ -158,14 +158,14 @@ export function OnboardingWizard({ onComplete }: Props) {
           {step === 2 && (
             <>
               <p className="gg-onboarding-text">
-                Для работы с Claude нужен API key. Получить: <code>console.anthropic.com</code> → Settings → API Keys.
+                Для работы с Grok нужен API key. Получить: <code>console.x.ai</code> → API Keys.
               </p>
               <div className="gg-onboarding-field">
-                <label>API Key (sk-ant-...)</label>
+                <label>API Key (xai-...)</label>
                 <input
                   type="password"
                   className="gg-input"
-                  placeholder="sk-ant-..."
+                  placeholder="xai-..."
                   value={apiKey}
                   onChange={e => setApiKey(e.target.value)}
                   autoFocus

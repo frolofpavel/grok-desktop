@@ -699,7 +699,7 @@ const delegateParallelHandler: ToolHandler = {
 
       const results = await Promise.allSettled(
         tasks.map(async (task) => {
-          const providerId = task.provider_id ?? ctx.currentProviderId ?? 'gemini-api'
+          const providerId = task.provider_id ?? ctx.currentProviderId ?? 'grok'
 
           // subagent-run visibility (fan-out V2) — каждая параллельная задача
           // показывается как своя карточка. Distinct callId `${call.id}:${task.id}`

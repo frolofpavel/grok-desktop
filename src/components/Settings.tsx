@@ -7,7 +7,7 @@ import type { AutonomousStatus } from '../types/api'
 import { ProfilesTab } from './ProfilesTab'
 import { buildCatalog, connectionStatus, type ConnectionStatus } from '../lib/model-catalog'
 import {
-  IconClaude, Icon1C, IconGoogleSheets, IconTelegram,
+  Icon1C, IconGoogleSheets, IconTelegram,
   IconSSH, IconBitrix, IconYandexDirect, IconYandexDisk,
   IconSkillsServer, IconPlug, IconHTTP, IconGitHub, IconSocialPublish
 } from './ConnectorIcons'
@@ -28,52 +28,6 @@ interface ProviderConfig {
 }
 
 const PROVIDERS: ProviderConfig[] = [
-  {
-    id: 'gemini-api',
-    name: 'Gemini',
-    transport: 'API',
-    description: 'Google. Полный агентский режим с tools.',
-    models: ['gemini-3-pro', 'gemini-3.5-flash', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-    defaultModel: 'gemini-3.5-flash',
-    secretKey: 'gemini_api_key',
-    keyHint: 'AIzaSy…',
-    keyLink: { url: 'https://aistudio.google.com', label: 'AI Studio' },
-    supportsTools: true
-  },
-  {
-    id: 'gemini-cli',
-    name: 'Gemini CLI',
-    transport: 'CLI',
-    description: 'Твоя Gemini Ultra подписка через gemini-cli. Без API ключа.',
-    models: ['auto', 'gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash'],
-    defaultModel: 'auto',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
-  {
-    id: 'claude',
-    name: 'Claude',
-    transport: 'API',
-    description: 'Anthropic. Полный агентский режим с tools.',
-    models: ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-20251101', 'claude-haiku-4-5-20251101'],
-    defaultModel: 'claude-sonnet-4-5-20251101',
-    secretKey: 'anthropic_api_key',
-    keyHint: 'sk-ant-…',
-    keyLink: { url: 'https://console.anthropic.com', label: 'Anthropic Console' },
-    supportsTools: true
-  },
-  {
-    id: 'claude-cli',
-    name: 'Claude Code',
-    transport: 'CLI',
-    description: 'Твоя Claude Pro/Max подписка через claude CLI.',
-    models: ['auto', 'claude-sonnet-4-6', 'claude-opus-4-5', 'claude-haiku-4-5', 'claude-sonnet-4-5'],
-    defaultModel: 'auto',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
   {
     id: 'grok',
     name: 'Grok',
@@ -96,150 +50,6 @@ const PROVIDERS: ProviderConfig[] = [
     secretKey: null,
     keyHint: '',
     supportsTools: false
-  },
-  {
-    id: 'openai',
-    name: 'ChatGPT',
-    transport: 'API',
-    description: 'OpenAI. Полный агентский режим с tools.',
-    models: ['gpt-5', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'],
-    defaultModel: 'gpt-5',
-    secretKey: 'openai_api_key',
-    keyHint: 'sk-…',
-    keyLink: { url: 'https://platform.openai.com/api-keys', label: 'OpenAI Platform' },
-    supportsTools: true
-  },
-  {
-    id: 'codex-cli',
-    name: 'Codex CLI',
-    transport: 'CLI',
-    description: 'Твоя ChatGPT Plus/Pro подписка через codex CLI.',
-    models: ['auto', 'gpt-5-codex', 'gpt-5', 'gpt-5-mini', 'o3', 'o3-mini', 'gpt-4o'],
-    defaultModel: 'auto',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: false
-  },
-  // OpenAI-compatible extra-провайдеры (zеркало EXTRA_PROVIDERS из electron/ai/extra-providers.ts).
-  // При обновлении расширений — обновляй ОБА файла; renderer не имеет доступа к main.
-  {
-    id: 'openrouter',
-    name: 'OpenRouter',
-    transport: 'API',
-    description: 'Один ключ → все модели (Claude, GPT, Gemini, Grok, open-source).',
-    models: ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-6', 'openai/gpt-5', 'openai/gpt-5-mini', 'google/gemini-3-pro', 'google/gemini-3.5-flash', 'x-ai/grok-4', 'deepseek/deepseek-v3', 'meta-llama/llama-3.3-70b-instruct'],
-    defaultModel: 'anthropic/claude-sonnet-4-6',
-    secretKey: 'openrouter_api_key',
-    keyHint: 'sk-or-...',
-    keyLink: { url: 'https://openrouter.ai/keys', label: 'openrouter.ai/keys' },
-    supportsTools: true
-  },
-  {
-    id: 'deepseek',
-    name: 'DeepSeek',
-    transport: 'API',
-    description: 'Китайские модели V4 за копейки. v4-flash / v4-pro (reasoning). Лучший fallback для бюджета.',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
-    defaultModel: 'deepseek-v4-flash',
-    secretKey: 'deepseek_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://platform.deepseek.com/api_keys', label: 'platform.deepseek.com' },
-    supportsTools: true
-  },
-  {
-    id: 'moonshot',
-    name: 'Moonshot Kimi',
-    transport: 'API',
-    description: 'Китайский Kimi K2.6 — SoTA по агентам и коду. Дёшево, длинный контекст, OpenAI-совместим.',
-    models: ['kimi-k2.6', 'kimi-k2.5', 'moonshot-v1-128k', 'moonshot-v1-32k', 'moonshot-v1-8k'],
-    defaultModel: 'kimi-k2.6',
-    secretKey: 'moonshot_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://platform.moonshot.ai/console/api-keys', label: 'platform.moonshot.ai' },
-    supportsTools: true
-  },
-  {
-    id: 'qwen',
-    name: 'Qwen (Alibaba)',
-    transport: 'API',
-    description: 'Alibaba Qwen3 через DashScope. qwen3-coder-plus — кодер, qwen3-max — флагман. OpenAI-совместим.',
-    models: ['qwen3-max', 'qwen3-coder-plus', 'qwen3-coder-flash', 'qwen-max', 'qwen-plus', 'qwen-flash'],
-    defaultModel: 'qwen3-coder-plus',
-    secretKey: 'qwen_api_key',
-    keyHint: 'sk-...',
-    keyLink: { url: 'https://bailian.console.aliyun.com/', label: 'bailian.console.aliyun.com' },
-    supportsTools: true
-  },
-  {
-    id: 'mistral',
-    name: 'Mistral',
-    transport: 'API',
-    description: 'Европейский провайдер. Без санкционных рисков. Codestral хорош для кода.',
-    models: ['mistral-large-latest', 'mistral-small-latest', 'codestral-latest', 'ministral-8b-latest'],
-    defaultModel: 'mistral-large-latest',
-    secretKey: 'mistral_api_key',
-    keyHint: 'API key...',
-    keyLink: { url: 'https://console.mistral.ai/api-keys', label: 'console.mistral.ai' },
-    supportsTools: true
-  },
-  {
-    id: 'groq',
-    name: 'Groq',
-    transport: 'API',
-    description: 'LPU-инференс: Llama/Mixtral на 500+ tok/s. Для streaming-чатов где важна реакция.',
-    models: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
-    defaultModel: 'llama-3.3-70b-versatile',
-    secretKey: 'groq_api_key',
-    keyHint: 'gsk_...',
-    keyLink: { url: 'https://console.groq.com/keys', label: 'console.groq.com' },
-    supportsTools: true
-  },
-  {
-    id: 'ollama',
-    name: 'Ollama (local)',
-    transport: 'API',
-    description: 'Локальный сервер. Запусти `ollama serve`. $0, без интернета, данные не уходят.',
-    models: ['llama3.3', 'qwen2.5-coder', 'deepseek-r1', 'mistral', 'gemma2'],
-    defaultModel: 'llama3.3',
-    secretKey: null,
-    keyHint: '',
-    supportsTools: true
-  },
-  // 🇷🇺 Российские провайдеры. Mark в description для отличия.
-  {
-    id: 'yandex-gpt',
-    name: 'YandexGPT',
-    transport: 'API',
-    description: '🇷🇺 152-ФЗ совместим. Yandex Cloud Foundation Models.',
-    models: ['yandexgpt/latest', 'yandexgpt-lite/latest', 'yandexgpt-32k/latest'],
-    defaultModel: 'yandexgpt/latest',
-    secretKey: 'yandex_api_key',
-    keyHint: 'AQVN…',
-    keyLink: { url: 'https://console.yandex.cloud/iam', label: 'Yandex Cloud Console' },
-    supportsTools: false
-  },
-  {
-    id: 'gigachat',
-    name: 'GigaChat',
-    transport: 'API',
-    description: '🇷🇺 152-ФЗ совместим. Сбер. GigaChat Lite / Plus / Pro / Max.',
-    models: ['GigaChat', 'GigaChat-Plus', 'GigaChat-Pro', 'GigaChat-Max'],
-    defaultModel: 'GigaChat',
-    secretKey: 'gigachat_client_id',
-    keyHint: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-    keyLink: { url: 'https://developers.sber.ru/portal/products/gigachat-api', label: 'developers.sber.ru' },
-    supportsTools: false
-  },
-  {
-    id: 'custom-openai',
-    name: 'Свой провайдер (OpenAI-compatible)',
-    transport: 'API',
-    description: 'Любой self-hosted endpoint совместимый с OpenAI API: vLLM, LM Studio, корпоративный шлюз.',
-    models: [], // Заполняется юзером через custom-блок в UI
-    defaultModel: '',
-    secretKey: 'custom_openai_api_key',
-    keyHint: '(опционально если endpoint требует)',
-    supportsTools: true
   }
 ]
 
@@ -267,7 +77,6 @@ interface ConnectorDef {
 }
 
 const CONNECTORS: ConnectorDef[] = [
-  { id: 'claude-oauth', name: 'Claude Code', description: 'OAuth token для Max подписки', icon: IconClaude, configuredKey: 'claude_code_oauth_token' },
   { id: 'onec', name: '1С OData', description: 'ERP-система, справочники, документы', icon: Icon1C, configuredKey: 'onec_base_url' },
   { id: 'http', name: 'HTTP API', description: 'Произвольные REST endpoints', icon: IconHTTP, configuredKey: '' },
   { id: 'gsheets', name: 'Google Sheets', description: 'Таблицы, данные, отчёты', icon: IconGoogleSheets, configuredKey: 'gsheets_service_account_json' },
@@ -774,8 +583,7 @@ type PrivacyTier = 'fz152' | 'local' | 'cloud'
 
 /** Privacy-tier по id провайдера: где физически обрабатываются данные. */
 function privacyTier(providerId: string): PrivacyTier {
-  if (providerId === 'yandex-gpt' || providerId === 'gigachat') return 'fz152'
-  if (providerId === 'ollama' || providerId === 'custom-openai' || providerId === 'llamacpp' || providerId.includes('local')) return 'local'
+  void providerId // оба провайдера (grok / grok-cli) — облако xAI
   return 'cloud'
 }
 
@@ -983,7 +791,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
       { id: 'audit',      label: 'Audit Log',            icon: '📋' }
     ] }
   ]
-  const [activeProvider, setActiveProvider] = useState<ProviderId>('gemini-api')
+  const [activeProvider, setActiveProvider] = useState<ProviderId>('grok')
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Record<string, string>>({})
   const [enabledModels, setEnabledModels] = useState<Set<string>>(new Set())
@@ -1005,7 +813,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [yDirectToken, setYDirectToken] = useState('')
   const [yDirectLogin, setYDirectLogin] = useState('')
   const [skillsServerBase, setSkillsServerBase] = useState('')
-  const [claudeOauthToken, setClaudeOauthToken] = useState('')
   const [yDiskToken, setYDiskToken] = useState('')
   const [githubToken, setGithubToken] = useState('')
   const [socialTgChannels, setSocialTgChannels] = useState('')
@@ -1015,10 +822,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [costCap, setCostCap] = useState('')
   const [configuredConnectors, setConfiguredConnectors] = useState<Set<string>>(new Set())
   const [openConnector, setOpenConnector] = useState<string | null>(null)
-  // Custom OpenAI-compatible: base URL + список моделей через запятую.
-  // Сохраняется в settings.custom_openai_baseurl / custom_openai_models.
-  const [customOpenaiBaseUrl, setCustomOpenaiBaseUrl] = useState('')
-  const [customOpenaiModels, setCustomOpenaiModels] = useState('')
   const [memories, setMemories] = useState<Memory[]>([])
   const [memoriesPath, setMemoriesPath] = useState<string | null>(null)
   // Core memory — MEMORY.md и USER.md
@@ -1034,7 +837,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     void (async () => {
       const provider = await window.api.settings.getKey('provider')
-      const valid = ['gemini-api', 'gemini-cli', 'claude', 'grok', 'openai'].includes(provider ?? '') ? (provider as ProviderId) : 'gemini-api'
+      const valid = ['grok', 'grok-cli'].includes(provider ?? '') ? (provider as ProviderId) : 'grok'
       setActiveProvider(valid)
       const keyVals: Record<string, string> = {}
       const modelVals: Record<string, string> = {}
@@ -1085,7 +888,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
       setYDirectToken((await window.api.settings.getKey('yandex_direct_token')) ?? '')
       setYDirectLogin((await window.api.settings.getKey('yandex_direct_login')) ?? '')
       setSkillsServerBase((await window.api.settings.getKey('skills_server_base')) ?? '')
-      setClaudeOauthToken((await window.api.settings.getKey('claude_code_oauth_token')) ?? '')
       setYDiskToken((await window.api.settings.getKey('yandex_disk_token')) ?? '')
       setGithubToken((await window.api.settings.getKey('github_token')) ?? '')
       setSocialTgChannels((await window.api.settings.getKey('social_publish_telegram_channels')) ?? '')
@@ -1093,8 +895,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
       setSocialVkGroupId((await window.api.settings.getKey('social_publish_vk_group_id')) ?? '')
       setSocialWebhooks((await window.api.settings.getKey('social_publish_webhooks')) ?? '')
       setCostCap((await window.api.settings.getKey('cost_cap_usd_per_session')) ?? '')
-      setCustomOpenaiBaseUrl((await window.api.settings.getKey('custom_openai_baseurl')) ?? '')
-      setCustomOpenaiModels((await window.api.settings.getKey('custom_openai_models')) ?? '')
       setCurrentLang((await window.api.settings.getKey('app_language')) ?? 'en')
       // Какие модели «включены» в picker'е. Пусто = все.
       const em = await window.api.settings.getKey('enabled_models')
@@ -1203,7 +1003,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
     await window.api.settings.setKey('yandex_direct_token', yDirectToken)
     await window.api.settings.setKey('yandex_direct_login', yDirectLogin)
     await window.api.settings.setKey('skills_server_base', skillsServerBase)
-    await window.api.settings.setKey('claude_code_oauth_token', claudeOauthToken)
     await window.api.settings.setKey('yandex_disk_token', yDiskToken)
     await window.api.settings.setKey('github_token', githubToken)
     await window.api.settings.setKey('social_publish_telegram_channels', socialTgChannels)
@@ -1212,36 +1011,12 @@ export function Settings({ onClose }: { onClose: () => void }) {
     await window.api.settings.setKey('social_publish_webhooks', socialWebhooks)
     await window.api.settings.setKey('cost_cap_usd_per_session', costCap)
     await window.api.settings.setKey('enabled_models', JSON.stringify([...enabledModels]))
-    await window.api.settings.setKey('custom_openai_baseurl', customOpenaiBaseUrl)
-    await window.api.settings.setKey('custom_openai_models', customOpenaiModels)
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
   }
 
   function renderConnectorForm(id: string): React.ReactNode {
     switch (id) {
-      case 'claude-oauth': return (
-        <>
-          <div className="gg-settings-row">
-            <label className="gg-settings-label">Long-lived OAuth token</label>
-            <input
-              className="gg-input"
-              type="password"
-              value={claudeOauthToken}
-              onChange={e => setClaudeOauthToken(e.target.value)}
-              placeholder="sk-ant-oat01-... (из `claude setup-token` в PowerShell)"
-              autoComplete="new-password"
-            />
-          </div>
-          <div className="gg-settings-hint">
-            Claude Code v2.1+ в headless режиме (через нашу программу) НЕ использует Max OAuth напрямую — требует
-            long-lived token. Получи: <code>claude setup-token</code> в PowerShell → подтверди в браузере →
-            копируй token сюда. Verstak будет передавать его как env var <code>CLAUDE_CODE_OAUTH_TOKEN</code>
-            при запуске claude. Решает «401 Invalid credentials» при выборе провайдера Claude Code.
-            Хранится зашифрованным через safeStorage. Действителен 1 год.
-          </div>
-        </>
-      )
       case 'onec': return (
         <>
           <div className="gg-settings-row">
@@ -1608,10 +1383,6 @@ export function Settings({ onClose }: { onClose: () => void }) {
           setKeys={setKeys}
           activeProvider={activeProvider}
           setActiveProvider={setActiveProvider}
-          customOpenaiBaseUrl={customOpenaiBaseUrl}
-          setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
-          customOpenaiModels={customOpenaiModels}
-          setCustomOpenaiModels={setCustomOpenaiModels}
         />
         </>
         )}
@@ -1782,8 +1553,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           )}
 
           <div className="gg-settings-hint" style={{ marginTop: 14 }}>
-            <strong>Требования:</strong> провайдер должен быть API-типа с ключом (Gemini / Claude / Grok / ChatGPT API).
-            CLI-провайдеры (Claude Code, Codex и т.д.) не годятся — нет неинтерактивного канала.
+            <strong>Требования:</strong> провайдер Grok API с ключом.
+            CLI-провайдер (Grok Build) не годится — нет неинтерактивного канала.
             Активный проект должен быть открыт.
           </div>
         </div>
@@ -2076,12 +1847,6 @@ interface ProvidersPageProps {
   setKeys: React.Dispatch<React.SetStateAction<Record<string, string>>>
   activeProvider: ProviderId
   setActiveProvider: (id: ProviderId) => void
-  // Custom OpenAI-compatible настройки. Уникальный провайдер 'custom-openai'
-  // имеет ещё 2 поля: baseUrl и список моделей через запятую.
-  customOpenaiBaseUrl: string
-  setCustomOpenaiBaseUrl: (v: string) => void
-  customOpenaiModels: string
-  setCustomOpenaiModels: (v: string) => void
 }
 
 function statusBadge(
@@ -2097,19 +1862,16 @@ function statusBadge(
     if (cliState.loggedIn)   return { label: 'Залогинен', tone: 'ready', title: 'OAuth/API key найден локально' }
     return { label: 'Не залогинен', tone: 'missing', title: 'CLI установлен но credentials не найдены — нажми «Перелогиниться»' }
   }
-  if (providerId === 'custom-openai') return { label: 'Custom URL', tone: 'ready' }
-  if (!secretKey) return { label: 'Локально', tone: 'cli' } // Ollama-подобные
+  if (!secretKey) return { label: 'Локально', tone: 'cli' }
   if (status === 'ready')  return { label: 'API ключ', tone: 'ready' }
   return { label: 'Нет ключа', tone: 'missing' }
 }
 
-type CliId = 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'
+type CliId = 'grok-cli'
 type CliStatusMap = Record<CliId, { installed: boolean; loggedIn: boolean; credPath?: string }>
 
 function ProvidersPage(props: ProvidersPageProps) {
-  const { providers, keys, setKeys, activeProvider, setActiveProvider,
-          customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
-          customOpenaiModels, setCustomOpenaiModels } = props
+  const { providers, keys, setKeys, activeProvider, setActiveProvider } = props
   const [expanded, setExpanded] = useState<ProviderId | null>(null)
   // toast — короткое сообщение о результате logout/relogin. null = ничего.
   const [toast, setToast] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
@@ -2133,12 +1895,9 @@ function ProvidersPage(props: ProvidersPageProps) {
 
   // «Подключён» = доступен для отправки запросов:
   //  - CLI: всегда (бинарь либо есть либо нет — реальный коннект сделает provider при send)
-  //  - Локальный (без secretKey, НЕ CLI): Ollama и подобное — всегда доступен на localhost
-  //  - custom-openai: главное чтобы baseUrl был задан, ключ опционален
   //  - Обычные API: должен быть введён secretKey
   function isConnected(p: ProviderConfig): boolean {
     if (p.transport === 'CLI') return true
-    if (p.id === 'custom-openai') return customOpenaiBaseUrl.trim().length > 0
     if (!p.secretKey) return true
     return Boolean(keys[p.secretKey])
   }
@@ -2217,9 +1976,7 @@ function ProvidersPage(props: ProvidersPageProps) {
   const hasAnyApiKey = providers.some(p =>
     p.transport === 'API' && p.secretKey != null && Boolean(keys[p.secretKey])
   )
-  // Custom-openai считаем «настроенным» если baseUrl задан, даже без ключа.
-  const hasCustomConfigured = customOpenaiBaseUrl.trim().length > 0
-  const showOnboardingHint = !hasAnyApiKey && !hasCustomConfigured
+  const showOnboardingHint = !hasAnyApiKey
 
   return (
     <div className="gg-settings-extra gg-providers-page">
@@ -2231,11 +1988,10 @@ function ProvidersPage(props: ProvidersPageProps) {
           <div className="gg-prov-onboarding-body">
             <div className="gg-prov-onboarding-title">Добавьте хотя бы один API ключ чтобы начать</div>
             <div className="gg-prov-onboarding-text">
-              Рекомендуем — <strong>Gemini API</strong> (есть бесплатный tier на
-              {' '}<a href="https://aistudio.google.com" target="_blank" rel="noreferrer">aistudio.google.com</a>)
-              или <strong>Claude API</strong> ({' '}<a href="https://console.anthropic.com" target="_blank" rel="noreferrer">console.anthropic.com</a>).
+              Получи ключ <strong>xAI (Grok)</strong> на
+              {' '}<a href="https://console.x.ai" target="_blank" rel="noreferrer">console.x.ai</a>.
               Найди карточку ниже → «+ Подключить» → вставь ключ → «Сохранить».
-              CLI-провайдеры (Claude Code, Gemini CLI и т.п.) — на твоей подписке, отдельная история.
+              CLI-провайдер (Grok Build) — на твоей подписке, отдельная история.
             </div>
           </div>
         </div>
@@ -2299,10 +2055,6 @@ function ProvidersPage(props: ProvidersPageProps) {
                   p={p}
                   keys={keys}
                   setKeys={setKeys}
-                  customOpenaiBaseUrl={customOpenaiBaseUrl}
-                  setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
-                  customOpenaiModels={customOpenaiModels}
-                  setCustomOpenaiModels={setCustomOpenaiModels}
                 />
               )}
             </div>
@@ -2335,10 +2087,6 @@ function ProvidersPage(props: ProvidersPageProps) {
                 p={p}
                 keys={keys}
                 setKeys={setKeys}
-                customOpenaiBaseUrl={customOpenaiBaseUrl}
-                setCustomOpenaiBaseUrl={setCustomOpenaiBaseUrl}
-                customOpenaiModels={customOpenaiModels}
-                setCustomOpenaiModels={setCustomOpenaiModels}
                 hint="Нажми «Сохранить» внизу — провайдер появится в подключённых."
               />
             )}
@@ -2347,7 +2095,7 @@ function ProvidersPage(props: ProvidersPageProps) {
       </div>
 
       <div className="gg-settings-hint" style={{ marginTop: 18 }}>
-        CLI-провайдеры (Gemini CLI / Claude Code / Grok Build / Codex) подключаются установкой соответствующего CLI вне приложения и логином через подписку. После этого они появляются как «Среда».
+        CLI-провайдер (Grok Build) подключается установкой grok CLI вне приложения и логином через подписку. После этого он появляется как «Среда».
       </div>
 
       {detectedClis !== null && detectedClis.length > 0 && (
@@ -2369,108 +2117,32 @@ function ProvidersPage(props: ProvidersPageProps) {
 }
 
 /**
- * Универсальный expand-блок для карточки провайдера: API ключ + (для custom-openai)
- * Base URL и список моделей. Выделен в отдельный компонент чтобы не дублировать
- * между «Подключёнными» и «Доступными» секциями.
+ * Универсальный expand-блок для карточки провайдера: ввод API ключа. Выделен в
+ * отдельный компонент чтобы не дублировать между «Подключёнными» и «Доступными».
  */
 interface ProviderExpandFormProps {
   p: ProviderConfig
   keys: Record<string, string>
   setKeys: React.Dispatch<React.SetStateAction<Record<string, string>>>
-  customOpenaiBaseUrl: string
-  setCustomOpenaiBaseUrl: (v: string) => void
-  customOpenaiModels: string
-  setCustomOpenaiModels: (v: string) => void
   /** Опциональный hint снизу (например, «Нажми Сохранить» для доступных). */
   hint?: string
 }
 
 function ProviderExpandForm(props: ProviderExpandFormProps) {
-  const { p, keys, setKeys, customOpenaiBaseUrl, setCustomOpenaiBaseUrl,
-          customOpenaiModels, setCustomOpenaiModels, hint } = props
-  const isCustom = p.id === 'custom-openai'
-  const isYandex = p.id === 'yandex-gpt'
-  const isGigaChat = p.id === 'gigachat'
+  const { p, keys, setKeys, hint } = props
 
   return (
     <div className="gg-prov-card-expand">
-      {isYandex && (
-        <>
-          <div className="gg-label">Folder ID</div>
-          <input
-            className="gg-input"
-            value={keys['yandex_folder_id'] ?? ''}
-            onChange={e => setKeys(k => ({ ...k, yandex_folder_id: e.target.value }))}
-            placeholder="b1g…"
-            spellCheck={false}
-            autoFocus
-          />
-          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            Yandex Cloud Console → выбери каталог → ID в адресной строке.
-            Хранится зашифрованно через safeStorage.
-          </div>
-        </>
-      )}
-
-      {isGigaChat && (
-        <>
-          <div className="gg-label">Client Secret</div>
-          <input
-            className="gg-input"
-            type="password"
-            value={keys['gigachat_client_secret'] ?? ''}
-            onChange={e => setKeys(k => ({ ...k, gigachat_client_secret: e.target.value }))}
-            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-            autoFocus
-          />
-          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            ⚠ GigaChat использует сертификат Сбера (Russian Trusted Root CA), которого
-            нет в стандартном trust store Node.js. Соединение зашифровано TLS, но
-            CA не проверяется. В следующей версии добавим bundle Russian Trusted CA.
-          </div>
-        </>
-      )}
-
-      {isCustom && (
-        <>
-          <div className="gg-label">Base URL</div>
-          <input
-            className="gg-input"
-            value={customOpenaiBaseUrl}
-            onChange={e => setCustomOpenaiBaseUrl(e.target.value)}
-            placeholder="https://my-endpoint.local/v1 или http://localhost:8000/v1"
-            spellCheck={false}
-            autoFocus
-          />
-          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            Любой OpenAI-compatible endpoint: vLLM, LM Studio, Text Generation WebUI, корпоративный шлюз.
-          </div>
-
-          <div className="gg-label">Модели (через запятую)</div>
-          <input
-            className="gg-input"
-            value={customOpenaiModels}
-            onChange={e => setCustomOpenaiModels(e.target.value)}
-            placeholder="qwen2.5-72b-instruct, llama-3.3-70b, mistral-large"
-            spellCheck={false}
-            style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}
-          />
-          <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 4, marginBottom: 10 }}>
-            Список ID моделей которые твой endpoint умеет (то что идёт в параметре <code>model</code> запроса).
-          </div>
-        </>
-      )}
-
       {p.secretKey && (
         <>
-          <div className="gg-label">{isCustom ? 'API ключ (если endpoint требует)' : 'API ключ'}</div>
+          <div className="gg-label">API ключ</div>
           <input
             className="gg-input"
             type="password"
             value={keys[p.secretKey] ?? ''}
             onChange={e => setKeys(k => ({ ...k, [p.secretKey!]: e.target.value }))}
             placeholder={p.keyHint}
-            autoFocus={!isCustom}
+            autoFocus
           />
           {p.keyLink && (
             <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)', marginTop: 6 }}>
@@ -2480,7 +2152,7 @@ function ProviderExpandForm(props: ProviderExpandFormProps) {
         </>
       )}
 
-      {!p.secretKey && !isCustom && (
+      {!p.secretKey && (
         <div className="gg-text-tertiary" style={{ fontSize: 'var(--text-xs)' }}>
           Ключ не нужен — это локальный/embedded провайдер. Нажми «Сохранить» внизу чтобы активировать.
         </div>

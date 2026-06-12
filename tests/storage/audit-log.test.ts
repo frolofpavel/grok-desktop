@@ -19,8 +19,8 @@ describe('audit-log run_id', () => {
       chatId: 1,
       action: 'session_start',
       detail: '{}',
-      providerId: 'gemini-api',
-      model: 'gemini-2.5-pro',
+      providerId: 'grok',
+      model: 'grok-4',
       runId: 'run-abc'
     })
     const entries = queryAudit(db, project)

@@ -12,7 +12,7 @@ export const en = {
     enter: 'Enter →',
     profile: 'Profile',
     features: {
-      providers: '10+ AI providers in one window',
+      providers: 'Grok API and Grok Build in one window',
       memory: 'Memory across sessions',
       agents: 'Parallel agents',
     },

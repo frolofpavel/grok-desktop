@@ -2,18 +2,12 @@ import { useEffect, useState, useCallback } from 'react'
 import type { ProviderDescriptorDTO } from '../types/api'
 
 // Renderer-side зеркало ProviderId из electron/ai/registry.ts. Держим в синхроне
-// при добавлении новых провайдеров (electron/ai/extra-providers.ts).
-export type ProviderId =
-  | 'gemini-api' | 'gemini-cli'
-  | 'claude' | 'claude-cli'
-  | 'grok' | 'grok-cli'
-  | 'openai' | 'codex-cli'
-  | 'yandex-gpt' | 'gigachat'
-  | 'openrouter' | 'deepseek' | 'moonshot' | 'qwen' | 'mistral' | 'groq' | 'ollama' | 'custom-openai'
+// при добавлении новых провайдеров.
+export type ProviderId = 'grok' | 'grok-cli'
 
 export interface ProviderInfo {
   id: ProviderId
-  /** Short human label shown in chat status — e.g. "Gemini", "Claude", "Grok" */
+  /** Short human label shown in chat status — e.g. "Grok", "Grok Build" */
   label: string
   /** Currently selected model id for this provider */
   model: string
@@ -78,7 +72,6 @@ function getDefaultModel(id: string): string {
 export function isModelValidForProvider(providerId: string, model: string): boolean {
   const meta = _providerCache?.[providerId]
   if (!meta) return false
-  // custom-openai: пользователь задаёт модели сам — любая непустая строка валидна
   if (meta.models.length === 0) return model.length > 0
   return meta.models.includes(model)
 }
@@ -88,15 +81,11 @@ export function getProviderSecretKey(id: string): string | null {
   return _providerCache?.[id]?.secretKey ?? null
 }
 
-const KNOWN_IDS: ProviderId[] = [
-  'gemini-api', 'gemini-cli', 'claude', 'claude-cli', 'grok', 'grok-cli', 'openai', 'codex-cli',
-  'yandex-gpt', 'gigachat',
-  'openrouter', 'deepseek', 'moonshot', 'qwen', 'mistral', 'groq', 'ollama', 'custom-openai'
-]
+const KNOWN_IDS: ProviderId[] = ['grok', 'grok-cli']
 
 function parseProviderId(v: string | null | undefined): ProviderId {
   if (v && (KNOWN_IDS as string[]).includes(v)) return v as ProviderId
-  return 'gemini-api'
+  return 'grok'
 }
 
 const POLL_INTERVAL_MS = 1500
@@ -109,7 +98,7 @@ interface UseProviderResult extends ProviderInfo {
 }
 
 export function useProvider(): UseProviderResult {
-  const [id, setId] = useState<ProviderId>('gemini-api')
+  const [id, setId] = useState<ProviderId>('grok')
   const [model, setModelState] = useState<string>('')
 
   const refresh = useCallback(async () => {

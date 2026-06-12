@@ -72,17 +72,6 @@ export function runDoctor(settings: DoctorSettings): DoctorReport {
       })
       continue
     }
-    // Ollama — локальный сервис (OpenAI-совместимый), ключ необязателен.
-    if (p.id === 'ollama') {
-      const hasKey = !!settings.getSecret(p.secretKey)
-      providers.push({
-        id: p.id,
-        name: p.name,
-        status: 'n-a',
-        detail: hasKey ? 'локальный, ключ задан' : 'локальный, ключ не требуется'
-      })
-      continue
-    }
     const hasKey = !!settings.getSecret(p.secretKey)
     providers.push({
       id: p.id,

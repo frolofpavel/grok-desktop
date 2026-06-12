@@ -50,21 +50,6 @@ export function estimateComplexity(messages: ChatMessage[], toolHistory: string[
  */
 export function recommendModel(providerId: string, complexity: TaskComplexity): string | null {
   const MAP: Record<string, Record<TaskComplexity, string>> = {
-    'gemini-api': {
-      simple: 'gemini-3-flash',
-      moderate: 'gemini-3.5-flash',
-      complex: 'gemini-3-pro',
-    },
-    'claude': {
-      simple: 'claude-haiku-4-5',
-      moderate: 'claude-sonnet-4-6',
-      complex: 'claude-opus-4-5',
-    },
-    'openai': {
-      simple: 'gpt-4o-mini',
-      moderate: 'gpt-4o',
-      complex: 'o1',
-    },
     'grok': {
       simple: 'grok-4-fast',
       moderate: 'grok-4-fast',

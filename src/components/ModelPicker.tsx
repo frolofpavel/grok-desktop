@@ -15,27 +15,14 @@ interface ProviderOption {
 const CLI_BETA_HINT = 'CLI-провайдеры требуют локальной установки. Если агент не отвечает — переключитесь на API-версию.'
 
 const PROVIDER_OPTIONS: ProviderOption[] = [
-  { id: 'gemini-api', label: 'Gemini',             description: 'API · с tools' },
-  { id: 'gemini-cli', label: 'Gemini Ultra (beta)', description: 'CLI · подписка' },
-  { id: 'claude',     label: 'Claude',             description: 'API · с tools' },
-  { id: 'claude-cli', label: 'Claude Code (beta)', description: 'CLI · Pro/Max подписка' },
   { id: 'grok',       label: 'Grok',               description: 'API · с tools' },
   { id: 'grok-cli',   label: 'Grok Build (beta)',  description: 'CLI · SuperGrok подписка' },
-  { id: 'openai',     label: 'ChatGPT',            description: 'API · с tools' },
-  { id: 'codex-cli',  label: 'Codex (beta)',       description: 'CLI · Plus подписка' },
-  { id: 'yandex-gpt', label: 'YandexGPT 🇷🇺',     description: 'API · 152-ФЗ' },
-  { id: 'gigachat',   label: 'GigaChat 🇷🇺',       description: 'API · 152-ФЗ' },
 ]
 
 // Секретный ключ для каждого API-провайдера. CLI-провайдеры = null (не нужен).
 // null-ключ = провайдер считается «всегда настроен» (ollama, CLI).
 const API_SECRET_KEY: Partial<Record<ProviderId, string>> = {
-  'gemini-api':   'gemini_api_key',
-  'claude':       'anthropic_api_key',
-  'grok':         'xai_api_key',
-  'openai':       'openai_api_key',
-  'yandex-gpt':   'yandex_api_key',
-  'gigachat':     'gigachat_client_id',
+  'grok': 'xai_api_key',
 }
 
 interface Props {
@@ -132,7 +119,7 @@ export function ModelPicker({ onOpenSettings }: Props) {
         onClick={() => setOpen(v => !v)}
         title={t.modelPicker.changeModel}
       >
-        <span className={`gg-provider-dot ${provider.id === 'gemini-cli' ? 'cli' : ''}`} />
+        <span className={`gg-provider-dot ${provider.transport === 'CLI' ? 'cli' : ''}`} />
         <span className="gg-model-pill-name">{provider.label}</span>
         <span className="gg-model-pill-sep">·</span>
         <span className="gg-model-pill-transport">{shortModel(provider.model)}</span>
@@ -240,7 +227,7 @@ export function ModelPicker({ onOpenSettings }: Props) {
 
 function shortModel(m: string): string {
   if (m === 'auto') return 'auto'
-  // Strip date suffix from claude-...-20251101 and gpt-5/4o families
+  // Strip date suffix from dated model ids
   const dateMatch = m.match(/(.*)-\d{8}$/)
   if (dateMatch) return dateMatch[1]
   return m

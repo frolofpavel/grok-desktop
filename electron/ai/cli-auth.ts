@@ -1,6 +1,5 @@
 /**
- * Logout / relogin для CLI-провайдеров (Claude Code, Gemini CLI, Grok Build,
- * Codex CLI). До этого «Отключить» для CLI было disabled — единственный
+ * Logout / relogin для CLI-провайдера (Grok Build). До этого «Отключить» для CLI было disabled — единственный
  * способ перелогиниться был руками в терминале. Теперь:
  *
  * - logoutCli(providerId): сначала пытается `<bin> logout` (это поддерживают
@@ -25,7 +24,7 @@ import { homedir, platform } from 'os'
 import { join } from 'path'
 import type { ProviderId } from './registry'
 
-export type CliProviderId = Extract<ProviderId, 'claude-cli' | 'gemini-cli' | 'grok-cli' | 'codex-cli'>
+export type CliProviderId = Extract<ProviderId, 'grok-cli'>
 
 /** Описание одного CLI-провайдера для auth-операций. */
 interface CliAuthDescriptor {
@@ -44,20 +43,6 @@ interface CliAuthDescriptor {
 }
 
 const DESCRIPTORS: Record<CliProviderId, CliAuthDescriptor> = {
-  'claude-cli': {
-    bin: 'claude',
-    credFiles: ['.claude/.credentials.json'],
-    loginCmd: 'claude',
-    logoutSubcmd: 'logout',
-    label: 'Claude Code'
-  },
-  'gemini-cli': {
-    bin: 'gemini',
-    credFiles: ['.gemini/oauth_creds.json', '.gemini/credentials.json'],
-    loginCmd: 'gemini',
-    logoutSubcmd: 'logout',
-    label: 'Gemini CLI'
-  },
   'grok-cli': {
     bin: 'grok',
     credFiles: ['.grok/credentials.json', '.grok/auth.json', '.grok/oauth.json'],
@@ -66,13 +51,6 @@ const DESCRIPTORS: Record<CliProviderId, CliAuthDescriptor> = {
     // полагаемся на удаление credentials.
     logoutSubcmd: null,
     label: 'Grok Build'
-  },
-  'codex-cli': {
-    bin: 'codex',
-    credFiles: ['.codex/auth.json'],
-    loginCmd: 'codex',
-    logoutSubcmd: 'logout',
-    label: 'Codex CLI'
   }
 }
 
@@ -264,7 +242,7 @@ export async function reloginCli(providerId: CliProviderId): Promise<ReloginResu
 
 /** Список поддерживаемых CLI providerId — для UI чтобы знать какие кнопки рендерить. */
 export function isCliProvider(id: string): id is CliProviderId {
-  return id === 'claude-cli' || id === 'gemini-cli' || id === 'grok-cli' || id === 'codex-cli'
+  return id === 'grok-cli'
 }
 
 export interface CliStatus {
@@ -294,12 +272,9 @@ export function getCliStatus(providerId: CliProviderId): CliStatus {
   return { installed, loggedIn: credPath !== undefined, credPath }
 }
 
-/** Bulk status для всех 4 CLI — для одного IPC-вызова на загрузку Settings. */
+/** Bulk status для всех CLI — для одного IPC-вызова на загрузку Settings. */
 export function getAllCliStatus(): Record<CliProviderId, CliStatus> {
   return {
-    'claude-cli': getCliStatus('claude-cli'),
-    'gemini-cli': getCliStatus('gemini-cli'),
-    'grok-cli':   getCliStatus('grok-cli'),
-    'codex-cli':  getCliStatus('codex-cli')
+    'grok-cli': getCliStatus('grok-cli')
   }
 }

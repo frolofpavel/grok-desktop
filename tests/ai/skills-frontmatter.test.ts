@@ -13,7 +13,7 @@ describe('parseSkillDoc', () => {
 id: code-review
 name: Code Review
 icon: "🔍"
-default_provider: claude
+default_provider: grok
 ---
 
 Body here.`
@@ -21,7 +21,7 @@ Body here.`
     expect(doc.frontmatter.id).toBe('code-review')
     expect(doc.frontmatter.name).toBe('Code Review')
     expect(doc.frontmatter.icon).toBe('🔍')
-    expect(doc.frontmatter.default_provider).toBe('claude')
+    expect(doc.frontmatter.default_provider).toBe('grok')
     expect(doc.body).toBe('Body here.')
   })
 

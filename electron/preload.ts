@@ -24,9 +24,6 @@ contextBridge.exposeInMainWorld('api', {
   doctor: {
     run: () => ipcRenderer.invoke('doctor:run')
   },
-  router: {
-    recommend: (taskText: string) => ipcRenderer.invoke('router:recommend', taskText)
-  },
   policy: {
     matrix: () => ipcRenderer.invoke('policy:matrix')
   },
@@ -171,9 +168,6 @@ contextBridge.exposeInMainWorld('api', {
   },
   cli: {
     detect: () => ipcRenderer.invoke('cli:detect')
-  },
-  localModels: {
-    scan: () => ipcRenderer.invoke('local-models:scan')
   },
   term: {
     spawn: (cwd: string) => ipcRenderer.invoke('term:spawn', cwd) as Promise<number>,

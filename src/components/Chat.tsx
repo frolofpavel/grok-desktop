@@ -4,7 +4,6 @@ import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
 import { ModelPicker } from './ModelPicker'
-import { TierRecommendation } from './TierRecommendation'
 import { ModePicker } from './ModePicker'
 import { VoiceInput } from './VoiceInput'
 import { TimelineBar } from './TimelineBar'
@@ -111,10 +110,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   const warningTimer = useRef<number | null>(null)
   const currentSendIdRef = useRef<number | null>(null)
   const [undoCount, setUndoCount] = useState(0)
-  // Cross-verify: результат авто-ревью другим провайдером после изменения файлов.
-  // null = ещё не было; object = последний результат (сбрасывается при новом send).
-  const [crossVerify, setCrossVerify] = useState<{ result: string; provider: string; ok: boolean } | null>(null)
-  const [cvExpanded, setCvExpanded] = useState(false)
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
 
   function flashWarning(msg: string) {
@@ -379,11 +374,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           result: event.result
         })
       }
-      else if (event.type === 'cross-verify') {
-        // Результат авто-кросс-верификации — показываем pill под ответом агента
-        setCrossVerify({ result: event.result, provider: event.provider, ok: event.ok })
-        setCvExpanded(false)
-      }
       else if (event.type === 'done') {
         const path = store.path
         const activeChatId = store.activeChatId
@@ -501,8 +491,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   }, [panelMenuOpen])
 
   // Live token preview: debounce text changes (400ms) and ask the main process
-  // to count tokens for the current draft. Gemini API gives an exact count;
-  // CLI / other providers get a rough 4-chars-per-token estimate.
+  // to count tokens for the current draft (rough 4-chars-per-token estimate).
   useEffect(() => {
     const text = input.trim()
     if (!text) { setPreviewTokens(null); return }
@@ -609,7 +598,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const userAttachments = attachments
     store.clearActivity()
     setExhausted(null)  // new send wipes any pending continue state
-    setCrossVerify(null)  // сбрасываем предыдущий результат cross-verify
     setInput('')
     setAttachments([])
     const summary = userAttachments.length > 0
@@ -655,8 +643,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     const allMessages = [...useProject.getState().messages].slice(0, -1)
     // Skill override: если активен скилл — system prompt берётся из его тела.
     // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
-    // несовместим с тем что предлагает скилл. Например: скилл говорит 'claude'
-    // (API), пользователь выбрал 'claude-cli' (CLI/подписка) — оба = Claude,
+    // несовместим с тем что предлагает скилл. Например: скилл говорит 'grok'
+    // (API), пользователь выбрал 'grok-cli' (CLI/подписка) — оба = Grok,
     // НЕ переключаем. Это сохраняет выбор пользователя по подписке/API.
     const activeSkill = useSkillsStore.getState().activeSkillId
       ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
@@ -666,10 +654,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       // Узнаём текущий provider пользователя — чтобы решить override или нет
       const currentProvider = await window.api.settings.getKey('provider')
       const skillProvider = activeSkill.default_provider
-      // «Семейство» провайдера — для совместимости (claude vs claude-cli — одно)
+      // «Семейство» провайдера — для совместимости (grok vs grok-cli — одно)
       const family = (p: string | null | undefined): string =>
-        (p ?? '').replace(/-cli$|-api$/, '').replace(/^gemini.*$/, 'gemini')
-            .replace(/^(claude|grok|openai|codex).*$/, '$1')
+        (p ?? '').replace(/-cli$|-api$/, '').replace(/^grok.*$/, 'grok')
       const overrideProvider = skillProvider && family(skillProvider) !== family(currentProvider)
         ? skillProvider
         : undefined
@@ -1013,22 +1000,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               {m.content && !isStreamingAssistant && (
                 <MessageActions text={m.content} />
               )}
-              {/* Cross-verify pill: показываем под последним assistant-сообщением */}
-              {isLast && m.role === 'assistant' && !isStreaming && crossVerify && (
-                <div
-                  className={`gg-cross-verify ${crossVerify.ok ? 'is-ok' : 'is-warn'}`}
-                  onClick={() => setCvExpanded(v => !v)}
-                  title={cvExpanded ? 'Свернуть' : 'Развернуть результат ревью'}
-                >
-                  <span className="gg-cv-badge">
-                    {crossVerify.ok ? '✅' : '⚠️'} Проверено {crossVerify.provider}
-                    <span className="gg-cv-chevron">{cvExpanded ? '▴' : '▾'}</span>
-                  </span>
-                  {cvExpanded && (
-                    <div className="gg-cv-detail">{crossVerify.result}</div>
-                  )}
-                </div>
-              )}
             </div>
           )
         })}
@@ -1241,7 +1212,6 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             </div>
             <ModePicker mode={agentMode} onChange={setAgentMode} />
             <ModelPicker onOpenSettings={onOpenSettings} />
-            <TierRecommendation input={input} />
           </div>
         </div>
       </div>

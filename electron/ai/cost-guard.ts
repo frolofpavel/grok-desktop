@@ -20,27 +20,12 @@ interface ModelPrice {
 // Цены в $ per 1M tokens. Должны быть синхронизированы с src/lib/pricing.ts.
 // Дубликат сознательный — renderer и main не имеют shared modules.
 const PRICES: Record<string, ModelPrice> = {
-  'claude-opus-4-5':       { input: 15.0, output: 75.0, cached: 1.5 },
-  'claude-sonnet-4-6':     { input: 3.0,  output: 15.0, cached: 0.3 },
-  'claude-sonnet-4-5':     { input: 3.0,  output: 15.0, cached: 0.3 },
-  'claude-haiku-4-5':      { input: 1.0,  output: 5.0,  cached: 0.1 },
-  'gemini-3-pro':          { input: 2.50, output: 15.0 },
-  'gemini-3.5-flash':      { input: 0.30, output: 2.50 },
-  'gemini-3-flash':        { input: 0.30, output: 2.50 },
-  'gemini-2.5-pro':        { input: 1.25, output: 10.0 },
-  'gemini-2.5-flash':      { input: 0.30, output: 2.50 },
-  'gpt-5':                 { input: 1.25, output: 10.0 },
-  'gpt-5-mini':            { input: 0.25, output: 2.0 },
-  'gpt-4o':                { input: 2.5,  output: 10.0 },
-  'gpt-4o-mini':           { input: 0.15, output: 0.60 },
-  'o1':                    { input: 15.0, output: 60.0 },
-  'o1-mini':               { input: 3.0,  output: 12.0 },
   'grok-4':                { input: 5.0,  output: 15.0 },
   'grok-4-fast':           { input: 0.20, output: 0.50 },
   'grok-3':                { input: 3.0,  output: 15.0 }
 }
 
-const CLI_FREE: Set<ProviderId> = new Set(['gemini-cli', 'claude-cli', 'grok-cli', 'codex-cli'])
+const CLI_FREE: Set<ProviderId> = new Set(['grok-cli'])
 
 export interface CostGuard {
   /** Накопить usage и проверить cap. Возвращает true если превышено → abort. */

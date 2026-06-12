@@ -4,16 +4,6 @@ interface IconProps {
   size?: number
 }
 
-export function IconClaude({ size = 18 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="9" cy="9" r="7" />
-      <path d="M6 9c0-1.66 1.34-3 3-3s3 1.34 3 3-1.34 3-3 3" />
-      <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  )
-}
-
 export function Icon1C({ size = 18 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

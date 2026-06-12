@@ -13,7 +13,7 @@ export const ru: Translations = {
     enter: 'Войти →',
     profile: 'Профиль',
     features: {
-      providers: '10+ AI-провайдеров в одном окне',
+      providers: 'Grok API и Grok Build в одном окне',
       memory: 'Память между сессиями',
       agents: 'Параллельные агенты',
     },

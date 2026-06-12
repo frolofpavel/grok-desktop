@@ -25,13 +25,13 @@ describe('settings', () => {
   it('returns null for missing key', () => {
     db = openDb(join(dir, 't.db'))
     const settings = createSettings(db, fakeSafeStorage)
-    expect(settings.getSecret('gemini_api_key')).toBeNull()
+    expect(settings.getSecret('xai_api_key')).toBeNull()
   })
 
   it('roundtrips encrypted secret', () => {
     db = openDb(join(dir, 't.db'))
     const settings = createSettings(db, fakeSafeStorage)
-    settings.setSecret('gemini_api_key', 'AIzaSyTest123')
-    expect(settings.getSecret('gemini_api_key')).toBe('AIzaSyTest123')
+    settings.setSecret('xai_api_key', 'xai-Test123')
+    expect(settings.getSecret('xai_api_key')).toBe('xai-Test123')
   })
 })

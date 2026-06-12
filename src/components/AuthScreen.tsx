@@ -3,7 +3,7 @@ import { useT } from '../i18n'
 import type { Lang } from '../i18n'
 import authBgUrl from '../assets/auth-bg.webp'
 import authVideoUrl from '../assets/auth-bg.mp4'
-import type { DetectedCli, DetectedLocalServer } from '../types/api'
+import type { DetectedCli } from '../types/api'
 
 /**
  * AuthScreen — экран регистрации/входа. Показывается ПЕРЕД основным приложением
@@ -30,10 +30,10 @@ const ROLES: { value: Role; label: string; icon: string }[] = [
 ]
 
 const ROLE_DEFAULTS: Record<Role, { provider: string; model: string }> = {
-  developer: { provider: 'gemini-api', model: 'gemini-2.5-flash' },
-  designer:  { provider: 'gemini-api', model: 'gemini-2.5-flash' },
-  manager:   { provider: 'gemini-api', model: 'gemini-2.5-flash' },
-  student:   { provider: 'gemini-api', model: 'gemini-2.5-flash' },
+  developer: { provider: 'grok', model: 'grok-4' },
+  designer:  { provider: 'grok', model: 'grok-4-fast' },
+  manager:   { provider: 'grok', model: 'grok-4-fast' },
+  student:   { provider: 'grok', model: 'grok-4-fast' },
 }
 
 interface Profile {
@@ -64,7 +64,6 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   // fade-out animation при успешном входе
   const [leaving, setLeaving] = useState(false)
   const [clis, setClis] = useState<DetectedCli[]>([])
-  const [localServers, setLocalServers] = useState<DetectedLocalServer[]>([])
   const [scanLoading, setScanLoading] = useState(true)
   const [connectingId, setConnectingId] = useState<string | null>(null)
 
@@ -87,13 +86,9 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
       } catch { /* первый запуск */ }
       setLoading(false)
     })()
-    Promise.all([
-      window.api.cli.detect().catch(() => [] as DetectedCli[]),
-      window.api.localModels.scan().catch(() => [] as DetectedLocalServer[])
-    ]).then(([cliList, serverList]) => {
-      setClis(cliList)
-      setLocalServers(serverList)
-    }).finally(() => setScanLoading(false))
+    window.api.cli.detect().catch(() => [] as DetectedCli[])
+      .then(cliList => setClis(cliList))
+      .finally(() => setScanLoading(false))
   }, [])
 
   async function ensureProfile(provider: string, model: string) {
@@ -120,7 +115,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
   }
 
   async function connectCli(cli: DetectedCli) {
-    const supported = ['claude-cli', 'codex-cli', 'gemini-cli', 'grok-cli']
+    const supported = ['grok-cli']
     if (!supported.includes(cli.id)) return
     setBusy(true)
     setConnectingId(cli.id)
@@ -128,32 +123,6 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
     try {
       await ensureProfile(cli.id, 'auto')
       await activateProvider(cli.id, 'auto')
-      doLeave()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setBusy(false)
-      setConnectingId(null)
-    }
-  }
-
-  async function connectLocalServer(server: DetectedLocalServer) {
-    const model = server.models[0] ?? ''
-    if (!model) {
-      setError(`${server.name}: сервер найден, но список моделей пуст`)
-      return
-    }
-
-    const provider = server.id === 'ollama' ? 'ollama' : 'custom-openai'
-    setBusy(true)
-    setConnectingId(server.id)
-    setError(null)
-    try {
-      if (provider === 'custom-openai') {
-        await window.api.settings.setKey('custom_openai_baseurl', server.baseUrl)
-        await window.api.settings.setKey('custom_openai_models', server.models.join(', '))
-      }
-      await ensureProfile(provider, model)
-      await activateProvider(provider, model)
       doLeave()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -271,7 +240,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
             </li>
           </ul>
 
-          {(scanLoading || clis.length > 0 || localServers.length > 0) && (
+          {(scanLoading || clis.length > 0) && (
             <div className="gg-auth-detected">
               <div className="gg-auth-detected-title">
                 {scanLoading ? 'Сканирую ПК...' : 'Найдено на твоём ПК'}
@@ -283,7 +252,7 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
                     <span>{c.name}</span>
                     <span className="gg-auth-detected-version">{c.version}</span>
                   </span>
-                  {['claude-cli', 'codex-cli', 'gemini-cli', 'grok-cli'].includes(c.id) && (
+                  {['grok-cli'].includes(c.id) && (
                     <button
                       type="button"
                       className="gg-auth-connect"
@@ -293,28 +262,6 @@ export function AuthScreen({ onComplete, onLangChange }: Props) {
                       {connectingId === c.id ? '...' : 'Подключить'}
                     </button>
                   )}
-                </div>
-              ))}
-              {localServers.map(server => (
-                <div key={server.id} className="gg-auth-detected-item">
-                  <span className="gg-auth-detected-dot is-local" />
-                  <span className="gg-auth-detected-main">
-                    <span>
-                      {server.name}
-                      <span className="gg-auth-local-badge">LOCAL</span>
-                    </span>
-                    <span className="gg-auth-detected-version">
-                      {server.models.length} моделей · {server.models.slice(0, 2).join(', ')}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    className="gg-auth-connect"
-                    onClick={() => void connectLocalServer(server)}
-                    disabled={busy || server.models.length === 0}
-                  >
-                    {connectingId === server.id ? '...' : 'Подключить'}
-                  </button>
                 </div>
               ))}
             </div>
