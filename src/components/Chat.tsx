@@ -196,7 +196,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         store.pushActivity({
           id: event.callId,
           kind: 'write',
-          label: 'write_file',
+          label: provider.id === 'grok-cli' ? 'Grok Build: write_file' : 'write_file',
           detail: event.path,
           status: 'pending',
           timestamp: Date.now()
@@ -215,7 +215,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         store.pushActivity({
           id: event.callId,
           kind: 'command',
-          label: 'run_command',
+          label: provider.id === 'grok-cli' ? 'Grok Build: run_command' : 'run_command',
           detail: event.command,
           status: 'pending',
           timestamp: Date.now()
@@ -371,7 +371,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           skill: event.skill,
           task: event.task,
           status: event.status,
-          result: event.result
+          result: event.result,
+          role: event.role,
+          toolCount: event.toolCount
         })
       }
       else if (event.type === 'done') {
@@ -924,28 +926,45 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   </div>
                 )
               })}
-              {showSubagents && subagentRuns.map(sa => {
-                const statusLabel = sa.status === 'running' ? 'выполняется' : sa.status === 'done' ? 'готово' : 'ошибка'
-                return (
-                  <div key={sa.callId} className={`gg-subagent is-${sa.status}`}>
-                    <div className="gg-subagent-head">
-                      <span className="gg-subagent-title">🤖 Sub-agent: {sa.label}</span>
-                      <span className={`gg-subagent-pill is-${sa.status}`}>{statusLabel}</span>
+              {showSubagents && (
+                <>
+                  {/* При большом количестве параллельных агентов показываем сводку,
+                      чтобы не захламлять чат (поддержка "до 100 агентов" в стиле Claude Code). */}
+                  {subagentRuns.length > 5 && (
+                    <div className="gg-subagent-summary">
+                      🤖 Параллельных агентов: {subagentRuns.length} • 
+                      готово {subagentRuns.filter(s => s.status === 'done').length} • 
+                      ошибок {subagentRuns.filter(s => s.status === 'error').length}
                     </div>
-                    <div className="gg-subagent-meta">
-                      {sa.skill && <span className="gg-subagent-tag">скилл: {sa.skill}</span>}
-                      {sa.provider && <span className="gg-subagent-tag">провайдер: {sa.provider}</span>}
-                    </div>
-                    <div className="gg-subagent-task">{sa.task}</div>
-                    {sa.result && (
-                      <details className="gg-subagent-result">
-                        <summary>{sa.status === 'error' ? 'Ошибка' : 'Результат'}</summary>
-                        <div className="gg-subagent-result-body">{sa.result}</div>
-                      </details>
-                    )}
-                  </div>
-                )
-              })}
+                  )}
+                  {subagentRuns.map(sa => {
+                    const statusLabel = sa.status === 'running' ? 'выполняется' : sa.status === 'done' ? 'готово' : 'ошибка'
+                    return (
+                      <div key={sa.callId} className={`gg-subagent is-${sa.status}`}>
+                        <div className="gg-subagent-head">
+                          <span className="gg-subagent-title">🤖 Sub-agent: {sa.label}</span>
+                          <span className={`gg-subagent-pill is-${sa.status}`}>{statusLabel}</span>
+                        </div>
+                        <div className="gg-subagent-meta">
+                          {sa.skill && <span className="gg-subagent-tag">скилл: {sa.skill}</span>}
+                          {sa.provider && <span className="gg-subagent-tag">провайдер: {sa.provider}</span>}
+                          {sa.role && <span className="gg-subagent-tag">роль: {sa.role}</span>}
+                          {typeof sa.toolCount === 'number' && sa.toolCount > 0 && (
+                            <span className="gg-subagent-tag">🔧 {sa.toolCount} tool-вызовов</span>
+                          )}
+                        </div>
+                        <div className="gg-subagent-task">{sa.task}</div>
+                        {sa.result && (
+                          <details className="gg-subagent-result">
+                            <summary>{sa.status === 'error' ? 'Ошибка' : 'Результат'}</summary>
+                            <div className="gg-subagent-result-body">{sa.result}</div>
+                          </details>
+                        )}
+                      </div>
+                    )
+                  })}
+                </>
+              )}
               {m.role === 'assistant' && (
                 <div className="gg-msg-meta">
                   <span className="gg-msg-author">{provider.label}</span>
@@ -960,11 +979,15 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                   const hasVisibleAnswer = !!(m.content && m.content.trim())
                   const isFinal = !isStreamingAssistant
                   const onlyThinking = !hasVisibleAnswer && isFinal
+                  const isGrokBuild = provider.id === 'grok-cli'
+                  const thinkingLabel = onlyThinking
+                    ? 'Только размышление, без видимого ответа'
+                    : (isGrokBuild ? 'Размышление Grok Build' : 'Размышление модели')
                   return (
                     <details className="gg-thinking" open={onlyThinking || undefined}>
                       <summary className="gg-thinking-summary">
                         <span>💭</span>
-                        <span>{onlyThinking ? 'Только размышление, без видимого ответа' : 'Размышление модели'}</span>
+                        <span>{thinkingLabel}</span>
                         <span className="gg-thinking-len">{m.thinking.length} симв.</span>
                       </summary>
                       <div className="gg-thinking-body">

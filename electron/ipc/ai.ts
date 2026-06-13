@@ -814,7 +814,10 @@ async function runApiConversation(
       agentMode, skillRegistry, getSecretForDelegate,
       currentProviderId: providerId,
       mcpClient: mcpClientRef,
-      appendAudit: appendAuditFn
+      appendAudit: appendAuditFn,
+      // Cost guard сессии — субагенты (delegate_task/delegate_parallel) учитывают
+      // свои токены в этот же cap, чтобы не обойти лимит сессии (Фаза 1).
+      subCostGuard: costGuard
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []

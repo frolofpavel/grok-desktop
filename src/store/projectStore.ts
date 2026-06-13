@@ -36,6 +36,9 @@ export interface SubagentRunCard {
   task: string
   status: 'running' | 'done' | 'error'
   result?: string
+  role?: string
+  /** Сколько tool-вызовов выполнил субагент (Фаза 1 — субы используют tools). */
+  toolCount?: number
 }
 
 export type ViewId = 'chat' | 'tasks' | 'journal' | 'plan' | 'workflow' | 'calendar' | 'feedback' | 'browser' | 'skills' | 'design' | 'video' | 'inspector' | 'memory-gov'

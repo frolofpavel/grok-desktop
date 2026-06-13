@@ -87,3 +87,36 @@ export function classifyCommand(command: string): CommandClassification {
   }
   return { allowed: true }
 }
+
+/**
+ * Whitelist проверочных команд для роли verifier (Фаза 1 мультиагентности).
+ *
+ * verifier-субагент может запускать ТОЛЬКО неразрушающие проверки: тесты,
+ * type-check, линт. Любая другая команда (установка пакетов, git-операции,
+ * запуск произвольных скриптов) для него запрещена — он верифицирует, а не
+ * меняет состояние. executor таким лимитом не ограничен (у него полный
+ * denylist-гейт classifyCommand).
+ *
+ * Совпадение по «команда содержит проверочный токен» — намеренно мягкое:
+ * `npm run type`, `npx tsc --noEmit`, `npm test -- --run`, `pnpm vitest` и т.п.
+ * все проходят. Префиксы окружения (`cross-env X=1 vitest`) тоже.
+ */
+const VERIFIER_ALLOW_PATTERNS: RegExp[] = [
+  /\b(vitest|jest|mocha|pytest|ava)\b/i,
+  /\bnpm\s+(run\s+)?test\b/i,
+  /\b(yarn|pnpm)\s+(run\s+)?test\b/i,
+  /\bnpm\s+run\s+(type|typecheck|lint)\b/i,
+  /\b(yarn|pnpm)\s+(run\s+)?(type|typecheck|lint)\b/i,
+  /\btsc\b/i,
+  /\beslint\b/i,
+  /\bruff\b/i,
+  /\bmypy\b/i
+]
+
+export function isVerifierCommand(command: string): boolean {
+  const trimmed = normalize(command)
+  if (!trimmed) return false
+  // Сначала общий denylist — разрушающее запрещено даже если совпало с allow.
+  if (!classifyCommand(trimmed).allowed) return false
+  return VERIFIER_ALLOW_PATTERNS.some(p => p.test(trimmed))
+}

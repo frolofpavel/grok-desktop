@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { diffLines, type Change } from 'diff'
 import { useProject } from '../store/projectStore'
+import { useProvider } from '../hooks/useProvider'
 
 interface FileDiffStats {
   added: number
@@ -21,6 +22,7 @@ function computeDiff(before: string, after: string): FileDiffStats {
 
 export function DiffView() {
   const { pendingWrites, resolvePendingWrite, updateActivity, path } = useProject()
+  const provider = useProvider()
   const [activeCallId, setActiveCallId] = useState<string | null>(null)
 
   // Whenever the queue changes, keep activeCallId pointing at something valid
@@ -84,7 +86,8 @@ export function DiffView() {
     await window.api.ai.resolveWrite(callId, true, w.sendId)
     updateActivity(callId, { status: 'ok', detail: `${w.path} (+${d.added} −${d.removed})` })
     if (path) {
-      void window.api.journal.append(path, 'tool', `Изменён файл: ${w.path}`, `+${d.added} −${d.removed} строк`)
+      const prefix = provider.id === 'grok-cli' ? 'Grok Build: ' : ''
+      void window.api.journal.append(path, 'tool', `${prefix}Изменён файл: ${w.path}`, `+${d.added} −${d.removed} строк`)
     }
     resolvePendingWrite(callId)
   }
@@ -109,7 +112,7 @@ export function DiffView() {
         <div className="gg-modal-header">
           <div>
             <div className="gg-modal-title">
-              {pendingWrites.length === 1 ? 'Изменение файла' : `Изменения в ${pendingWrites.length} файлах`}
+              {provider.id === 'grok-cli' ? 'Grok Build предлагает изменения' : (pendingWrites.length === 1 ? 'Изменение файла' : `Изменения в ${pendingWrites.length} файлах`)}
             </div>
             <div className="gg-diff-path" style={{ marginTop: 4 }}>{active.path}</div>
           </div>

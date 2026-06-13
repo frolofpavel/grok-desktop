@@ -74,7 +74,7 @@ export type ChatEvent =
   | { type: 'tool-activity'; callId: string; name: string; label: string; detail: string; status: 'ok' | 'error' }
   | { type: 'plan-created'; planId: number; title: string; stepCount: number }
   | { type: 'preflight'; callId: string; summary: string; affectedZones: string[]; risk: 'low' | 'medium' | 'high'; riskReason: string; verifyAfter: string[]; outOfScope: string[] }
-  | { type: 'subagent-run'; callId: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string }
+  | { type: 'subagent-run'; callId: string; label: string; provider?: string; skill?: string; task: string; status: 'running' | 'done' | 'error'; result?: string; role?: string; toolCount?: number }
   | { type: 'artifact-created'; callId: string; kind: 'html' | 'docx'; filename: string; path: string; sizeBytes: number }
   | { type: 'usage'; usage: UsageDelta }
   | { type: 'info'; text: string }

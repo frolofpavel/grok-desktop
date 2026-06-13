@@ -267,7 +267,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'delegate_task',
-    description: 'Делегировать узкую подзадачу другому AI-агенту (другая модель или другой скилл). Используй когда: (а) нужна вторая независимая точка зрения на патч/решение; (б) подзадача узкая и можно отдать дешёвой модели (анализ stdout, классификация, поиск опечатки); (в) нужно вытащить контекст из источника с другим скиллом (например DOSSIER клиента). Результат подтягивается обратно как tool_result, основной агент использует его и продолжает свою работу. Sub-agent работает без tools (только размышление + ответ) — это намеренно, чтобы не было каскадов.',
+    description: 'Делегировать узкую подзадачу другому AI-агенту (другая модель / скилл / роль). Используй когда: (а) нужна вторая независимая точка зрения на патч/решение; (б) подзадача узкая и можно отдать дешёвой модели; (в) нужно вытащить контекст из источника с другим скиллом. Sub-agent теперь РАБОТАЕТ С ИНСТРУМЕНТАМИ (agent-loop): он может читать файлы, искать по проекту, а с ролью executor/verifier — править файлы и запускать проверки. Набор tools ограничен ролью (см. role). Результат подтягивается обратно как tool_result. Sub-agent НЕ может делегировать дальше (защита от рекурсии).',
     parameters: {
       type: 'object',
       properties: {
@@ -283,6 +283,11 @@ export const TOOL_DEFS: ToolDefinition[] = [
           type: 'string',
           description: 'Опционально — модель в рамках provider_id.'
         },
+        role: {
+          type: 'string',
+          enum: ['planner', 'critic', 'executor', 'verifier', 'researcher'],
+          description: 'Опционально — роль субагента. Определяет поведение И набор инструментов: researcher/critic/planner — read-only; verifier — read + проверки (test/typecheck/lint); executor — read + правки файлов + команды. Без роли — безопасный read-only набор.'
+        },
         prompt: {
           type: 'string',
           description: 'Что именно нужно от sub-agent. Конкретный запрос с контекстом.'
@@ -293,7 +298,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
   },
   {
     name: 'delegate_parallel',
-    description: 'Запускает несколько подзадач параллельно на разных провайдерах. Каждая задача выполняется независимо, результаты возвращаются все вместе. Используй для: параллельного анализа кода, одновременного поиска в нескольких файлах, cross-verification результатов.',
+    description: 'Запускает несколько подзадач параллельно. Каждая задача — независимый sub-agent С ИНСТРУМЕНТАМИ (agent-loop): он сам читает файлы / ищет по проекту, а с ролью executor/verifier правит код и запускает проверки. Provider задаётся НА КАЖДУЮ задачу — в одном батче можно СМЕШИВАТЬ grok (API) и grok-cli (Grok Build CLI). Поддерживает роли (planner/critic/executor/verifier/researcher) — роль определяет и поведение, и whitelist инструментов. Субагенты НЕ могут делегировать дальше (защита от рекурсии). Используй для параллельного анализа, кросс-верификации, исследования нескольких зон. До 10-12 задач с контролем concurrency.',
     parameters: {
       type: 'object',
       properties: {
@@ -304,7 +309,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
             properties: {
               id: { type: 'string', description: 'Уникальный ID задачи для идентификации в результатах' },
               prompt: { type: 'string', description: 'Текст задачи для субагента' },
-              provider_id: { type: 'string', description: 'Провайдер (опц. — по умолчанию текущий)' },
+              provider_id: { type: 'string', description: 'Провайдер для ЭТОЙ задачи (опц. — по умолчанию текущий). grok (API) и grok-cli (Grok Build) можно смешивать в одном батче.' },
               model: { type: 'string', description: 'Модель (опц.)' },
               role: {
                 type: 'string',
@@ -314,7 +319,7 @@ export const TOOL_DEFS: ToolDefinition[] = [
             },
             required: ['id', 'prompt']
           },
-          description: 'Массив подзадач (2-5 штук)'
+          description: 'Массив подзадач (рекомендуется 2-8, макс. 12)'
         }
       },
       required: ['tasks']

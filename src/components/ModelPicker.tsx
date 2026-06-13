@@ -9,14 +9,13 @@ interface ProviderOption {
   description: string
 }
 
-// CLI-провайдеры помечены (beta) с явным tooltip'ом.
-// Не скрываем — пользователь может ими пользоваться — но даём сигнал что они
-// требуют локальной установки CLI и иногда падают (особенно grok-cli на Windows).
-const CLI_BETA_HINT = 'CLI-провайдеры требуют локальной установки. Если агент не отвечает — переключитесь на API-версию.'
+// Grok Build — полноценный провайдер через официальный CLI от xAI.
+// Позиционируем как сильную опцию: локальность, нет отправки кода наружу, использует подписку.
+const CLI_HINT = 'Grok Build — официальный CLI от xAI. Работает полностью локально, без отправки кода во внешние сервисы. Требует установленный `grok` CLI и активную подписку.'
 
 const PROVIDER_OPTIONS: ProviderOption[] = [
   { id: 'grok',       label: 'Grok',               description: 'API · с tools' },
-  { id: 'grok-cli',   label: 'Grok Build (beta)',  description: 'CLI · SuperGrok подписка' },
+  { id: 'grok-cli',   label: 'Grok Build',         description: 'CLI · официальный агент xAI' },
 ]
 
 // Секретный ключ для каждого API-провайдера. CLI-провайдеры = null (не нужен).
@@ -135,7 +134,7 @@ export function ModelPicker({ onOpenSettings }: Props) {
               const isActive = provider.id === p.id
               let title: string | undefined
               if (!isConfigured) title = t.settings.apiKeyNotSet
-              else if (isCli) title = CLI_BETA_HINT
+              else if (isCli) title = CLI_HINT
               return (
                 <button
                   key={p.id}

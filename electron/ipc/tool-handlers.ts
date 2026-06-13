@@ -35,8 +35,15 @@ import { classifyMcpToolScope, mcpDecision, mcpBlockReason } from '../ai/mcp-pol
 import { getRolePrompt } from '../ai/agent-roles'
 import { invalidateProjectMap, markFileDirty } from '../ai/project-map'
 import type { McpClient } from '../mcp/client'
+import type { ProviderId } from '../ai/registry'
 
 const execFileAsync = promisify(execFile)
+
+// Таймаут на одну делегированную подзадачу. Поднят с 60с (one-shot эра) до 180с:
+// субагент теперь крутит agent-loop с tool-вызовами (read/patch/run_command),
+// что требует заметно больше времени. Лимит итераций (MAX_SUB_ITERATIONS) —
+// вторая, независимая граница; таймаут страхует от зависшего провайдера/команды.
+const SUB_TASK_TIMEOUT_MS = 180_000
 
 // ============================================================================
 // Types
@@ -95,6 +102,13 @@ export interface ToolContext {
   mcpClient?: McpClient
   /** Опциональный аппендер в audit_log — вызывается после каждого tool call. */
   appendAudit?: (action: string, detail: string) => void
+  /** Cost guard сессии — прокидывается в sub-agent loop, чтобы токены субагентов
+   *  учитывались в общий cap (Фаза 1 мультиагентности). */
+  subCostGuard?: import('../ai/cost-guard').CostGuard
+  /** Provider id субагента — для cost-guard учёта внутри sub-loop. */
+  subProviderId?: import('../ai/registry').ProviderId
+  /** Модель субагента — для cost-guard учёта внутри sub-loop. */
+  subModel?: string
 }
 
 export type ToolMode = 'parallel-read' | 'sequential' | 'confirm-write'
@@ -557,6 +571,7 @@ const delegateTaskHandler: ToolHandler = {
       const skillId = call.args.skill_id ? String(call.args.skill_id) : null
       const providerOverride = call.args.provider_id ? String(call.args.provider_id) : null
       const modelOverride = call.args.model ? String(call.args.model) : null
+      const role = call.args.role ? String(call.args.role) : null
       const prompt = String(call.args.prompt ?? '').trim()
       if (!prompt) {
         return { id: call.id, name: call.name, result: '', error: 'delegate_task: prompt обязателен' }
@@ -570,8 +585,13 @@ const delegateTaskHandler: ToolHandler = {
         ?? skill?.default_provider
         ?? null  // null → ai:send возьмёт текущий default из settings
       const subModel = modelOverride ?? skill?.default_model ?? null
-      const systemPrompt = skill?.systemPrompt
-        ?? 'Ты — sub-agent. Выполни узкую задачу, ответь в 1-3 параграфа. Без лишних tools / markdown.'
+      // Промпт субагента: роль (если задана) + скилл/generic. Роль определяет
+      // и поведение, и набор tools (getRoleToolset). С tool-enabled loop'ом
+      // важно явно сказать субу, что у него ЕСТЬ инструменты.
+      const rolePrompt = role ? getRolePrompt(role) : null
+      const systemPrompt = rolePrompt
+        ?? skill?.systemPrompt
+        ?? 'Ты — sub-agent с доступом к инструментам (чтение файлов, поиск по проекту). Выполни узкую задачу, при необходимости используй tools, ответь по существу.'
 
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
@@ -580,14 +600,15 @@ const delegateTaskHandler: ToolHandler = {
           callId: call.id,
           name: 'delegate_task',
           label: 'delegate_task',
-          detail: `${skill?.name ?? skillId ?? 'generic'} via ${subProvider ?? 'auto'}`,
+          detail: `${skill?.name ?? skillId ?? role ?? 'generic'} via ${subProvider ?? 'auto'}`,
           status: 'ok'
         }
       })
 
       // subagent-run visibility (fan-out V1) — additive card в чате. label/skill/
-      // provider/task + status running → done/error. Не влияет на tool_result.
-      const subLabel = skill?.name ?? skillId ?? 'sub-agent'
+      // provider/task + status running → done/error + tool-счётчик (Фаза 1).
+      const subLabel = skill?.name ?? skillId ?? role ?? 'sub-agent'
+      let toolCount = 0
       const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
         ctx.sender.send('ai:event', {
           id: ctx.sendId,
@@ -597,6 +618,8 @@ const delegateTaskHandler: ToolHandler = {
             label: subLabel,
             provider: subProvider ?? undefined,
             skill: skillId ?? undefined,
+            role: role ?? undefined,
+            toolCount,
             task: prompt,
             status,
             result
@@ -605,9 +628,9 @@ const delegateTaskHandler: ToolHandler = {
       }
       emitSubagent('running')
 
-      // Внутренний one-shot call — реализуем через прямой вызов provider'а,
-      // без новой ipc-сессии (никаких дополнительных sendId, событий, и т.п.).
       const { createProvider, PROVIDERS } = await import('../ai/registry')
+      const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
+      const { getRoleToolset } = await import('../ai/role-tools')
       const fallbackProvider = subProvider ?? ctx.currentProviderId ?? null
       if (!fallbackProvider) {
         emitSubagent('error', 'нет провайдера')
@@ -623,44 +646,57 @@ const delegateTaskHandler: ToolHandler = {
         emitSubagent('error', `нет API key для ${fallbackProvider}`)
         return { id: call.id, name: call.name, result: '', error: `delegate_task: нет API key для ${fallbackProvider}` }
       }
-      const provider = createProvider(fallbackProvider as keyof typeof PROVIDERS, {
-        apiKey,
-        model: subModel ?? descriptor.defaultModel,
-        cwd: ctx.projectPath,
-        signal: ctx.signal
-      })
-      const messages = [
-        { role: 'system' as const, content: systemPrompt },
-        { role: 'user' as const, content: prompt }
-      ]
-      let collected = ''
+
+      // Per-task signal: проброс родительского abort + таймаут на весь loop.
+      // 180с (было 60с для one-shot) — loop с tool-вызовами требует больше времени.
+      const taskAc = new AbortController()
+      const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
+      const parentAbortHandler = () => taskAc.abort()
+      ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+
       try {
-        for await (const event of provider.send(messages, [])) {
-          if (ctx.signal.aborted) break
-          if (event.type === 'text' && typeof event.text === 'string') collected += event.text
-          else if (event.type === 'error') {
-            emitSubagent('error', event.message)
-            return { id: call.id, name: call.name, result: '', error: `delegate_task error: ${event.message}` }
-          } else if (event.type === 'done') break
+        const provider = createProvider(fallbackProvider as keyof typeof PROVIDERS, {
+          apiKey,
+          model: subModel ?? descriptor.defaultModel,
+          cwd: ctx.projectPath,
+          signal: taskAc.signal
+        })
+        // Whitelist tools по роли (если роль не задана — read-only default).
+        const allowedTools = getRoleToolset(role)
+        const subCtx: ToolContext = {
+          ...ctx,
+          subProviderId: fallbackProvider as ProviderId,
+          subModel: subModel ?? descriptor.defaultModel
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        emitSubagent('error', msg)
-        return { id: call.id, name: call.name, result: '', error: `delegate_task crashed: ${msg}` }
+        const messages = [
+          { role: 'system' as const, content: systemPrompt },
+          { role: 'user' as const, content: prompt }
+        ]
+        const res = await runSubAgentLoop({
+          provider, messages, allowedToolNames: allowedTools, ctx: subCtx,
+          signal: taskAc.signal, role,
+          onToolActivity: () => { toolCount++; emitSubagent('running') }
+        })
+        if (res.exitReason === 'error') {
+          emitSubagent('error', res.error)
+          return { id: call.id, name: call.name, result: '', error: `delegate_task error: ${res.error}` }
+        }
+        const trimmed = res.text.trim()
+        if (!trimmed) {
+          emitSubagent('error', 'sub-agent вернул пустой ответ')
+          return { id: call.id, name: call.name, result: '', error: 'delegate_task: sub-agent вернул пустой ответ' }
+        }
+        emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
+        try {
+          ctx.recordJournal(ctx.projectPath, 'note',
+            `🎭 Делегирование → ${skill?.name ?? skillId ?? role ?? fallbackProvider} (${res.toolCallCount} tools, ${res.exitReason})`,
+            `Запрос: ${prompt.slice(0, 200)}\n---\nОтвет: ${trimmed.slice(0, 600)}${trimmed.length > 600 ? '…' : ''}`)
+        } catch { /* journal не критично */ }
+        return { id: call.id, name: call.name, result: `[Delegate from ${skill?.name ?? skillId ?? role ?? fallbackProvider}]\n\n${trimmed}` }
+      } finally {
+        clearTimeout(timeoutId)
+        ctx.signal.removeEventListener('abort', parentAbortHandler)
       }
-      const trimmed = collected.trim()
-      if (!trimmed) {
-        emitSubagent('error', 'sub-agent вернул пустой ответ')
-        return { id: call.id, name: call.name, result: '', error: 'delegate_task: sub-agent вернул пустой ответ' }
-      }
-      emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
-      // Логируем в journal — для аудита
-      try {
-        ctx.recordJournal(ctx.projectPath, 'note',
-          `🎭 Делегирование → ${skill?.name ?? skillId ?? fallbackProvider}`,
-          `Запрос: ${prompt.slice(0, 200)}\n---\nОтвет: ${trimmed.slice(0, 600)}${trimmed.length > 600 ? '…' : ''}`)
-      } catch { /* journal не критично */ }
-      return { id: call.id, name: call.name, result: `[Delegate from ${skill?.name ?? skillId ?? fallbackProvider}]\n\n${trimmed}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
@@ -679,8 +715,11 @@ const delegateParallelHandler: ToolHandler = {
       if (!Array.isArray(tasks) || tasks.length === 0) {
         return { id: call.id, name: call.name, result: '', error: 'delegate_parallel: tasks обязателен и не должен быть пустым' }
       }
-      if (tasks.length > 5) {
-        return { id: call.id, name: call.name, result: '', error: 'delegate_parallel: максимум 5 параллельных задач' }
+      // Практический лимит повышен (было 5). Claude Code позволяет десятки агентов.
+      // Мы держим разумный потолок + concurrency, чтобы не убить rate limits и UI.
+      const MAX_PARALLEL = 12
+      if (tasks.length > MAX_PARALLEL) {
+        return { id: call.id, name: call.name, result: '', error: `delegate_parallel: максимум ${MAX_PARALLEL} параллельных задач` }
       }
 
       const { createProvider, PROVIDERS } = await import('../ai/registry')
@@ -697,86 +736,124 @@ const delegateParallelHandler: ToolHandler = {
         }
       })
 
-      const results = await Promise.allSettled(
-        tasks.map(async (task) => {
-          const providerId = task.provider_id ?? ctx.currentProviderId ?? 'grok'
+      // Простой concurrency-контроль без новых зависимостей.
+      // Запускаем батчами по CONCURRENCY — защищает провайдеры (особенно grok-cli) и не захламляет timeline.
+      const CONCURRENCY = 4
 
-          // subagent-run visibility (fan-out V2) — каждая параллельная задача
-          // показывается как своя карточка. Distinct callId `${call.id}:${task.id}`
-          // → upsert по callId, обновление status running → done/error в месте.
-          const subCallId = `${call.id}:${task.id}`
-          const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
-            ctx.sender.send('ai:event', {
-              id: ctx.sendId,
-              event: {
-                type: 'subagent-run',
-                callId: subCallId,
-                label: task.role ?? task.id,
-                provider: providerId,
-                task: task.prompt,
-                status,
-                result
-              }
-            })
-          }
-          emitSubagent('running')
+      async function processInBatches<T, R>(
+        items: T[],
+        batchSize: number,
+        processor: (item: T, index: number) => Promise<R>
+      ): Promise<PromiseSettledResult<R>[]> {
+        const results: PromiseSettledResult<R>[] = []
+        for (let i = 0; i < items.length; i += batchSize) {
+          const batch = items.slice(i, i + batchSize)
+          const batchResults = await Promise.allSettled(
+            batch.map((item, batchIdx) => processor(item, i + batchIdx))
+          )
+          results.push(...batchResults)
+        }
+        return results
+      }
 
-          const descriptor = PROVIDERS[providerId as keyof typeof PROVIDERS]
-          if (!descriptor) {
-            emitSubagent('error', `неизвестный provider ${providerId}`)
-            throw new Error(`неизвестный provider ${providerId}`)
-          }
-          const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
-          if (descriptor.secretKey && !apiKey) {
-            emitSubagent('error', `нет API key для ${providerId}`)
-            throw new Error(`нет API key для ${providerId}`)
-          }
+      const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
+      const { getRoleToolset } = await import('../ai/role-tools')
 
-          // Per-task AbortController с таймаутом 60 секунд
-          const taskAc = new AbortController()
-          const timeoutId = setTimeout(() => taskAc.abort(), 60_000)
-          // Если родительский signal прерван — прерываем и подзадачу
-          const parentAbortHandler = () => taskAc.abort()
-          ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+      const results = await processInBatches(tasks, CONCURRENCY, async (task, _idx) => {
+        // Идея 9: provider задаётся per-task → в одном батче можно смешивать
+        // grok (API) и grok-cli (Grok Build). Здесь каждая задача независимо
+        // резолвит свой провайдер.
+        const providerId = task.provider_id ?? ctx.currentProviderId ?? 'grok'
 
-          try {
-            const provider = createProvider(providerId as keyof typeof PROVIDERS, {
-              apiKey,
-              model: task.model ?? descriptor.defaultModel,
-              cwd: ctx.projectPath,
-              signal: taskAc.signal
-            })
-            const rolePrompt = task.role ? getRolePrompt(task.role) : null
-            const systemContent = rolePrompt ?? 'Ты — sub-agent. Выполни узкую задачу, ответь в 1-3 параграфа. Без лишних tools / markdown.'
-            const fullPrompt = rolePrompt
-              ? `${rolePrompt}\n\n---\n\nЗадача:\n${task.prompt}`
-              : task.prompt
-            const messages = [
-              { role: 'system' as const, content: systemContent },
-              { role: 'user' as const, content: fullPrompt }
-            ]
-            let collected = ''
-            for await (const event of provider.send(messages, [])) {
-              if (taskAc.signal.aborted) break
-              if (event.type === 'text' && typeof event.text === 'string') collected += event.text
-              else if (event.type === 'error') throw new Error(event.message)
-              else if (event.type === 'done') break
+        // subagent-run visibility (fan-out V2) — каждая параллельная задача
+        // показывается как своя карточка. Distinct callId `${call.id}:${task.id}`
+        // → upsert по callId, обновление status running → done/error в месте.
+        // Добавлена явная маркировка Grok Build (согласуется с полировкой провайдеров).
+        const subCallId = `${call.id}:${task.id}`
+        const isGrokBuild = providerId === 'grok-cli'
+        const baseLabel = task.role ?? task.id
+        const displayLabel = isGrokBuild ? `${baseLabel} (Grok Build)` : baseLabel
+        let toolCount = 0
+
+        const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
+          ctx.sender.send('ai:event', {
+            id: ctx.sendId,
+            event: {
+              type: 'subagent-run',
+              callId: subCallId,
+              label: displayLabel,
+              provider: providerId,
+              role: task.role,
+              toolCount,
+              task: task.prompt,
+              status,
+              result
             }
-            const trimmed = collected.trim()
-            if (!trimmed) throw new Error('sub-agent вернул пустой ответ')
-            emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
-            return { id: task.id, result: trimmed }
-          } catch (taskErr) {
-            // Любой неожиданный throw (createProvider, abort/timeout) — карточка
-            // не должна застрять на 'running'. Rethrow → Promise.allSettled reject.
-            emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
-            throw taskErr
-          } finally {
-            clearTimeout(timeoutId)
-            ctx.signal.removeEventListener('abort', parentAbortHandler)
+          })
+        }
+        emitSubagent('running')
+
+        const descriptor = PROVIDERS[providerId as keyof typeof PROVIDERS]
+        if (!descriptor) {
+          emitSubagent('error', `неизвестный provider ${providerId}`)
+          throw new Error(`неизвестный provider ${providerId}`)
+        }
+        const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
+        if (descriptor.secretKey && !apiKey) {
+          emitSubagent('error', `нет API key для ${providerId}`)
+          throw new Error(`нет API key для ${providerId}`)
+        }
+
+        // Per-task AbortController. Таймаут поднят с 60с до 180с — субагент
+        // теперь крутит tool-loop. Родительский signal прерывает подзадачу.
+        const taskAc = new AbortController()
+        const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
+        const parentAbortHandler = () => taskAc.abort()
+        ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+
+        try {
+          const subModel = task.model ?? descriptor.defaultModel
+          const provider = createProvider(providerId as keyof typeof PROVIDERS, {
+            apiKey,
+            model: subModel,
+            cwd: ctx.projectPath,
+            signal: taskAc.signal
+          })
+          const rolePrompt = task.role ? getRolePrompt(task.role) : null
+          const systemContent = rolePrompt
+            ?? 'Ты — sub-agent с доступом к инструментам (чтение файлов, поиск по проекту). Выполни узкую задачу, при необходимости используй tools, ответь по существу.'
+          const messages = [
+            { role: 'system' as const, content: systemContent },
+            { role: 'user' as const, content: task.prompt }
+          ]
+          // Whitelist tools по роли задачи (нет роли → read-only default).
+          const allowedTools = getRoleToolset(task.role)
+          const subCtx: ToolContext = {
+            ...ctx,
+            signal: taskAc.signal,
+            subProviderId: providerId as ProviderId,
+            subModel
           }
-        })
-      )
+          const res = await runSubAgentLoop({
+            provider, messages, allowedToolNames: allowedTools, ctx: subCtx,
+            signal: taskAc.signal, role: task.role,
+            onToolActivity: () => { toolCount++; emitSubagent('running') }
+          })
+          if (res.exitReason === 'error') throw new Error(res.error ?? 'sub-agent error')
+          const trimmed = res.text.trim()
+          if (!trimmed) throw new Error('sub-agent вернул пустой ответ')
+          emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
+          return { id: task.id, result: trimmed }
+        } catch (taskErr) {
+          // Любой неожиданный throw (createProvider, abort/timeout) — карточка
+          // не должна застрять на 'running'. Rethrow → Promise.allSettled reject.
+          emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
+          throw taskErr
+        } finally {
+          clearTimeout(timeoutId)
+          ctx.signal.removeEventListener('abort', parentAbortHandler)
+        }
+      })
 
       const output = results.map((r, i) => {
         const taskId = tasks[i].id

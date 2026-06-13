@@ -1289,8 +1289,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           )}
 
           <div className="gg-settings-hint" style={{ marginTop: 14 }}>
-            <strong>Требования:</strong> провайдер Grok API с ключом.
-            CLI-провайдер (Grok Build) не годится — нет неинтерактивного канала.
+            <strong>Требования:</strong> провайдер Grok API с ключом (для автономного режима в текущей версии нужен неинтерактивный канал).
+            Grok Build (CLI) работает отлично для обычных чатов и агентных сессий.
             Активный проект должен быть открыт.
           </div>
         </div>
@@ -1727,7 +1727,7 @@ function ProvidersPage(props: ProvidersPageProps) {
               Получи ключ <strong>xAI (Grok)</strong> на
               {' '}<a href="https://console.x.ai" target="_blank" rel="noreferrer">console.x.ai</a>.
               Найди карточку ниже → «+ Подключить» → вставь ключ → «Сохранить».
-              CLI-провайдер (Grok Build) — на твоей подписке, отдельная история.
+              Grok Build (CLI) подключается через официальный grok CLI и твою подписку xAI. Отдельный поток от API-ключа.
             </div>
           </div>
         </div>
