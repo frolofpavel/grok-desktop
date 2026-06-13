@@ -1,173 +1,120 @@
 #!/usr/bin/env node
 /**
- * Grok Desktop CLI — запуск AI-агента из терминала без GUI.
+ * Grok Desktop CLI - run the Grok API agent from a terminal without the GUI.
  *
- * Самодостаточный скрипт на plain ES modules: без Electron, без TypeScript.
- * Делает прямые HTTPS-запросы к провайдерам, выполняет инструменты локально.
- *
- * Использование:
- *   node scripts/grok-desktop-cli.mjs "исправь баг в src/auth.ts"
- *   node scripts/grok-desktop-cli.mjs -p grok -m grok-4 "объясни этот код"
- *   echo "fix tests" | node scripts/grok-desktop-cli.mjs --stdin
- *   node scripts/grok-desktop-cli.mjs --json "найди все TODO"
+ * This standalone script is intentionally Grok-only. The desktop app also
+ * supports the official Grok Build CLI (`grok`) as a first-class provider, but
+ * this helper talks directly to the xAI API so it can run without Electron.
  */
 
 import { parseArgs } from 'node:util'
-import { resolve, join, relative, dirname } from 'node:path'
+import { resolve, join, relative, dirname, isAbsolute } from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
-import { execSync, execFileSync } from 'node:child_process'
-import { createReadStream } from 'node:fs'
+import { readFile, readdir } from 'node:fs/promises'
+import { execFileSync, execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import https from 'node:https'
-import http from 'node:http'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-// ---------------------------------------------------------------------------
-// Аргументы
-// ---------------------------------------------------------------------------
+const GROK_MODELS = ['grok-4', 'grok-4-fast', 'grok-3']
+const DEFAULT_MODEL = 'grok-4'
+const BASE_URL = 'https://api.x.ai/v1'
+const MAX_TURNS = 20
+const MAX_FILE_BYTES = 200_000
+const IGNORE_DIRS = new Set([
+  'node_modules', '.git', 'out', 'dist', '.next', '.vite', '.verstak-data',
+  '__pycache__', 'venv', '.venv', 'target', 'build', 'release'
+])
+const FORBIDDEN_PATTERNS = [/\.env$/i, /\.key$/i, /creds.*\.json$/i, /id_ed25519$/i, /id_rsa$/i]
 
 const { values, positionals } = parseArgs({
   options: {
-    provider: { type: 'string', short: 'p', default: 'gemini-api' },
-    model:    { type: 'string', short: 'm' },
-    key:      { type: 'string', short: 'k' },
-    project:  { type: 'string', default: '.' },
-    mode:     { type: 'string', default: 'auto' },
-    stdin:    { type: 'boolean', default: false },
-    json:     { type: 'boolean', default: false },
-    help:     { type: 'boolean', short: 'h', default: false },
-    version:  { type: 'boolean', short: 'v', default: false },
+    provider: { type: 'string', short: 'p', default: 'grok' },
+    model: { type: 'string', short: 'm' },
+    key: { type: 'string', short: 'k' },
+    project: { type: 'string', default: '.' },
+    mode: { type: 'string', default: 'auto' },
+    stdin: { type: 'boolean', default: false },
+    json: { type: 'boolean', default: false },
+    help: { type: 'boolean', short: 'h', default: false },
+    version: { type: 'boolean', short: 'v', default: false }
   },
   allowPositionals: true,
-  strict: false,
+  strict: false
 })
 
-// ---------------------------------------------------------------------------
-// Help / version
-// ---------------------------------------------------------------------------
+const projectPath = resolve(process.cwd(), values.project ?? '.')
 
 if (values.help) {
   console.log(`
-Grok Desktop CLI — AI-агент в терминале без GUI
+Grok Desktop CLI - Grok API agent without the GUI
 
-Использование:
-  grok-desktop "ваш промпт"
-  grok-desktop -p grok -m grok-4 "исправь баг"
-  echo "объясни это" | grok-desktop --stdin
-  grok-desktop --json "найди все TODO-комментарии"
-  node scripts/grok-desktop-cli.mjs "ваш промпт"
+Usage:
+  grok-desktop "your prompt"
+  grok-desktop -m grok-4-fast "explain this repository"
+  echo "fix tests" | grok-desktop --stdin
+  grok-desktop --json "find all TODO comments"
 
-Опции:
-  -p, --provider   AI-провайдер: gemini-api (по умолч), claude, grok, openai,
-                   openrouter, deepseek, mistral, groq, ollama, yandexgpt, gigachat
-  -m, --model      Имя модели (по умолч: дефолтная провайдера)
-  -k, --key        API-ключ (или через env: GEMINI_API_KEY, ANTHROPIC_API_KEY, …)
-  --project        Директория проекта (по умолч: текущая)
-  --mode           Режим агента: auto (по умолч), ask, plan
-                   auto — все инструменты без подтверждения
-                   ask  — подтверждение перед write/run
-                   plan — только чтение, без записи
-  --stdin          Читать промпт из stdin
-  --json           Вывод в JSON-формате
-  -v, --version    Показать версию
-  -h, --help       Показать справку
+Options:
+  -p, --provider   Provider id. Only "grok" is supported by this standalone CLI.
+  -m, --model      Grok model: ${GROK_MODELS.join(', ')}. Default: ${DEFAULT_MODEL}
+  -k, --key        xAI API key. Also read from XAI_API_KEY or .verstak/settings.json.
+  --project        Project directory. Default: current directory.
+  --mode           Agent mode: auto, ask, plan. Default: auto.
+                   auto - tools run immediately
+                   ask  - prints a warning before write/run tools
+                   plan - blocks write/run tools
+  --stdin          Read prompt from stdin
+  --json           Print machine-readable JSON result
+  -v, --version    Show version
+  -h, --help       Show help
 
-Env-переменные:
-  GEMINI_API_KEY       Gemini API
-  ANTHROPIC_API_KEY    Claude (Anthropic)
-  XAI_API_KEY          Grok (xAI)
-  OPENAI_API_KEY       OpenAI
-  OPENROUTER_API_KEY   OpenRouter
-  DEEPSEEK_API_KEY     DeepSeek
-  MISTRAL_API_KEY      Mistral
-  GROQ_API_KEY         Groq
-  YANDEXGPT_API_KEY    YandexGPT (формат: folderID:iamToken)
-  GIGACHAT_CLIENT_ID   GigaChat (Client ID для OAuth)
+Environment:
+  XAI_API_KEY      Grok API key from https://console.x.ai
 
-Примеры:
-  GEMINI_API_KEY=xxx node scripts/grok-desktop-cli.mjs "list all TODO"
-  ANTHROPIC_API_KEY=xxx node scripts/grok-desktop-cli.mjs -p claude "fix src/auth.ts"
-  node scripts/grok-desktop-cli.mjs -p openrouter --key sk-or-xxx "explain this codebase"
+Official Grok Build CLI:
+  Install and authenticate the official "grok" CLI separately, then select
+  "Grok Build" inside the Grok Desktop app.
 `)
   process.exit(0)
 }
 
 if (values.version) {
-  const pkgPath = resolve(__dirname, '../package.json')
-  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8'))
   console.log(`Grok Desktop CLI v${pkg.version}`)
   process.exit(0)
 }
 
-// ---------------------------------------------------------------------------
-// Резолвинг API-ключа
-// ---------------------------------------------------------------------------
-
-/** ENV-переменные для каждого провайдера */
-const ENV_KEYS = {
-  'gemini-api':    'GEMINI_API_KEY',
-  'claude':        'ANTHROPIC_API_KEY',
-  'grok':          'XAI_API_KEY',
-  'openai':        'OPENAI_API_KEY',
-  'openrouter':    'OPENROUTER_API_KEY',
-  'deepseek':      'DEEPSEEK_API_KEY',
-  'mistral':       'MISTRAL_API_KEY',
-  'groq':          'GROQ_API_KEY',
-  'ollama':        null,  // локальный, ключ не нужен
-  'yandexgpt':     'YANDEXGPT_API_KEY',
-  'gigachat':      'GIGACHAT_CLIENT_ID',
+if (values.provider !== 'grok') {
+  console.error(`Unsupported provider "${values.provider}". Grok Desktop CLI is Grok-only; use --provider grok.`)
+  process.exit(1)
 }
 
-function resolveApiKey(provider, explicit) {
+function resolveApiKey(explicit) {
   if (explicit) return explicit
-  const envVar = ENV_KEYS[provider]
-  if (envVar === null) return ''  // ollama — без ключа
-  if (envVar && process.env[envVar]) return process.env[envVar]
-  // Попробуем .verstak/settings.json
+  if (process.env.XAI_API_KEY) return process.env.XAI_API_KEY
+
   const settingsPath = resolve(projectPath, '.verstak', 'settings.json')
   if (existsSync(settingsPath)) {
     try {
-      const s = JSON.parse(readFileSync(settingsPath, 'utf-8'))
-      const keyMap = {
-        'gemini-api': 'gemini_api_key',
-        'claude': 'anthropic_api_key',
-        'grok': 'xai_api_key',
-        'openai': 'openai_api_key',
-        'openrouter': 'openrouter_api_key',
-        'deepseek': 'deepseek_api_key',
-        'mistral': 'mistral_api_key',
-        'groq': 'groq_api_key',
-        'yandexgpt': 'yandexgpt_api_key',
-        'gigachat': 'gigachat_client_id',
-      }
-      const settingsKey = keyMap[provider]
-      if (settingsKey && s[settingsKey]) return s[settingsKey]
-    } catch { /* ignore */ }
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'))
+      if (settings.xai_api_key) return settings.xai_api_key
+    } catch {
+      // Ignore malformed local settings and fall through to a clear error.
+    }
   }
-  const envMsg = envVar ? `\nУстановите ${envVar} или передайте --key` : ''
-  throw new Error(`API-ключ для провайдера "${provider}" не найден.${envMsg}`)
+
+  throw new Error('XAI_API_KEY is not set. Add it to the environment or pass --key.')
 }
-
-// ---------------------------------------------------------------------------
-// Путь к проекту
-// ---------------------------------------------------------------------------
-
-const projectPath = resolve(process.cwd(), values.project ?? '.')
-
-// ---------------------------------------------------------------------------
-// Чтение промпта
-// ---------------------------------------------------------------------------
 
 async function readStdin() {
   return new Promise((resolve) => {
     let data = ''
-    process.stdin.setEncoding('utf-8')
+    process.stdin.setEncoding('utf8')
     process.stdin.on('data', chunk => { data += chunk })
     process.stdin.on('end', () => resolve(data.trim()))
-    // Таймаут если stdin пустой (не pipe)
     if (process.stdin.isTTY) resolve('')
   })
 }
@@ -178,369 +125,209 @@ if (values.stdin || (!prompt && !process.stdin.isTTY)) {
 }
 
 if (!prompt) {
-  console.error('Ошибка: укажите промпт как аргумент или передайте через --stdin\nДля справки: grok-desktop --help')
+  console.error('Error: provide a prompt argument or pipe one through --stdin. Use --help for examples.')
   process.exit(1)
 }
 
-// ---------------------------------------------------------------------------
-// HTTPS-утилита для streaming SSE / JSON
-// ---------------------------------------------------------------------------
-
-function httpsPost(url, headers, body) {
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url)
-    const options = {
-      hostname: parsedUrl.hostname,
-      path: parsedUrl.pathname + parsedUrl.search,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-    }
-    const mod = parsedUrl.protocol === 'https:' ? https : http
-    const req = mod.request(options, (res) => {
-      resolve(res)
-    })
-    req.on('error', reject)
-    req.write(JSON.stringify(body))
-    req.end()
-  })
-}
-
-async function streamResponse(res) {
-  return new Promise((resolve, reject) => {
-    let raw = ''
-    res.on('data', chunk => { raw += chunk.toString() })
-    res.on('end', () => resolve(raw))
-    res.on('error', reject)
-  })
-}
-
-// ---------------------------------------------------------------------------
-// Системный промпт
-// ---------------------------------------------------------------------------
-
-function buildSystemPrompt(projectPath) {
-  const lines = [
-    'Ты — AI-ассистент для разработки. Работаешь в режиме CLI без GUI.',
-    `Корень проекта: ${projectPath}`,
-    'Используй инструменты (read_file, write_file, run_command, list_directory, search_project, find_files) для работы с файлами и кодом.',
-    'Перед правкой кода — прочитай файл. Все пути — относительные от корня проекта.',
-    'После изменений — кратко сообщи что сделано.',
-  ]
-
-  // Попробуем загрузить user-layer (CLAUDE.md / AGENTS.md / .verstak/RULES.md)
-  const candidates = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.verstak/RULES.md']
-  for (const c of candidates) {
-    const p = join(projectPath, c)
-    if (existsSync(p)) {
-      try {
-        const content = readFileSync(p, 'utf-8').trim()
-        if (content) {
-          lines.push(`\n--- Правила проекта из ${c} ---\n${content}`)
-          break
-        }
-      } catch { /* ignore */ }
-    }
-  }
-
-  return lines.join('\n')
-}
-
-// ---------------------------------------------------------------------------
-// Инструменты — выполнение
-// ---------------------------------------------------------------------------
-
-const IGNORE_DIRS = new Set(['node_modules', '.git', 'out', 'dist', '.next', '.vite',
-  '.verstak-data', '__pycache__', 'venv', '.venv', 'target', 'build', 'release'])
-
-const FORBIDDEN_PATTERNS = [/\.env$/, /\.key$/, /creds.*\.json$/, /id_ed25519$/, /id_rsa$/]
-
 function isForbidden(filePath) {
   const base = filePath.split(/[\\/]/).pop() ?? ''
-  return FORBIDDEN_PATTERNS.some(p => p.test(base))
+  return FORBIDDEN_PATTERNS.some(pattern => pattern.test(base))
 }
 
-/** Безопасный join — не выходим за projectPath */
 function safeJoin(root, rel) {
-  const resolved = resolve(root, rel)
-  if (!resolved.startsWith(resolve(root))) {
-    throw new Error(`Выход за пределы проекта: ${rel}`)
+  const resolvedRoot = resolve(root)
+  const resolved = resolve(resolvedRoot, rel)
+  const back = relative(resolvedRoot, resolved)
+  if (back.startsWith('..') || isAbsolute(back)) {
+    throw new Error(`Path escapes project root: ${rel}`)
   }
   return resolved
 }
 
+function readProjectRules(root) {
+  const candidates = ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md', '.verstak/RULES.md']
+  for (const candidate of candidates) {
+    const abs = join(root, candidate)
+    if (!existsSync(abs)) continue
+    try {
+      const content = readFileSync(abs, 'utf8').trim()
+      if (content) return `\n--- Project rules from ${candidate} ---\n${content}`
+    } catch {
+      // Keep startup resilient if a rules file is unreadable.
+    }
+  }
+  return ''
+}
+
+function buildSystemPrompt(root) {
+  return [
+    'You are Grok Desktop CLI, a local-first AI coding agent powered by Grok.',
+    `Project root: ${root}`,
+    'Use tools when useful: read_file, list_directory, search_project, find_files, get_project_map, write_file, run_command.',
+    'Read files before editing them. Keep edits scoped. Do not read or write credentials, private keys, or env files.',
+    'After changes, summarize what changed and how it was checked.',
+    readProjectRules(root)
+  ].filter(Boolean).join('\n')
+}
+
 async function toolReadFile(args, root) {
-  const { path: relPath } = args
-  const absPath = safeJoin(root, relPath)
-  if (isForbidden(absPath)) return `Доступ запрещён: ${relPath}`
+  const rel = String(args.path ?? '')
+  if (!rel) return 'Error: path is required'
+  const abs = safeJoin(root, rel)
+  if (isForbidden(abs)) return `Access denied by policy: ${rel}`
   try {
-    const content = await readFile(absPath, 'utf-8')
-    return content.length > 200_000
-      ? content.slice(0, 200_000) + '\n... [файл обрезан, показаны первые 200 КБ]'
-      : content
-  } catch (e) {
-    return `Ошибка чтения ${relPath}: ${e.message}`
+    const st = statSync(abs)
+    if (!st.isFile()) return `Not a file: ${rel}`
+    if (st.size > MAX_FILE_BYTES) {
+      return `File is too large (${st.size} bytes). Limit: ${MAX_FILE_BYTES} bytes.`
+    }
+    return await readFile(abs, 'utf8')
+  } catch (err) {
+    return `Read failed for ${rel}: ${err.message}`
   }
 }
 
 async function toolListDirectory(args, root) {
-  const { path: relPath = '.' } = args
-  const absPath = safeJoin(root, relPath)
+  const rel = String(args.path ?? '.')
+  const abs = safeJoin(root, rel)
   try {
-    const entries = await readdir(absPath, { withFileTypes: true })
-    const lines = entries.map(e => (e.isDirectory() ? `${e.name}/` : e.name))
-    return lines.join('\n') || '(пустая директория)'
-  } catch (e) {
-    return `Ошибка: ${e.message}`
+    const entries = await readdir(abs, { withFileTypes: true })
+    return entries
+      .filter(e => !isForbidden(join(abs, e.name)))
+      .map(e => e.isDirectory() ? `${e.name}/` : e.name)
+      .join('\n') || '(empty directory)'
+  } catch (err) {
+    return `List failed for ${rel}: ${err.message}`
   }
 }
 
 async function toolWriteFile(args, root, mode) {
-  const { path: relPath, content } = args
-  const absPath = safeJoin(root, relPath)
-  if (isForbidden(absPath)) return `Запись запрещена: ${relPath}`
-  if (mode === 'plan') return `[plan mode] Запись заблокирована: ${relPath}`
+  const rel = String(args.path ?? '')
+  const content = String(args.content ?? '')
+  if (!rel) return 'Error: path is required'
+  if (mode === 'plan') return `[plan mode] Write blocked: ${rel}`
+  const abs = safeJoin(root, rel)
+  if (isForbidden(abs)) return `Write denied by policy: ${rel}`
   if (mode === 'ask') {
-    process.stderr.write(`\n⚠  Агент хочет записать: ${relPath}\n`)
-    // В неинтерактивном контексте — разрешаем (можно добавить readline позже)
+    process.stderr.write(`\n[confirm] Agent wants to write ${rel}. Non-interactive CLI will continue.\n`)
   }
   try {
-    const dir = dirname(absPath)
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(absPath, content, 'utf-8')
-    return `Записано: ${relPath}`
-  } catch (e) {
-    return `Ошибка записи ${relPath}: ${e.message}`
+    mkdirSync(dirname(abs), { recursive: true })
+    writeFileSync(abs, content, 'utf8')
+    return `Written: ${rel}`
+  } catch (err) {
+    return `Write failed for ${rel}: ${err.message}`
   }
 }
 
 async function toolRunCommand(args, root, mode) {
-  const { command } = args
-  if (mode === 'plan') return `[plan mode] Команда заблокирована: ${command}`
+  const command = String(args.command ?? '')
+  if (!command) return 'Error: command is required'
+  if (mode === 'plan') return `[plan mode] Command blocked: ${command}`
   if (mode === 'ask') {
-    process.stderr.write(`\n⚠  Агент хочет выполнить: ${command}\n`)
+    process.stderr.write(`\n[confirm] Agent wants to run: ${command}. Non-interactive CLI will continue.\n`)
   }
   try {
     const output = execSync(command, {
       cwd: root,
-      encoding: 'utf-8',
+      encoding: 'utf8',
       timeout: 60_000,
-      maxBuffer: 4 * 1024 * 1024,
+      maxBuffer: 4 * 1024 * 1024
     })
-    return output || '(нет вывода)'
-  } catch (e) {
-    return `Ошибка (exitCode ${e.status ?? '?'}): ${e.message}\n${e.stderr ?? ''}`
+    return output || '(no output)'
+  } catch (err) {
+    return `Command failed (exit ${err.status ?? '?'}): ${err.message}\n${err.stderr ?? ''}`
   }
 }
 
 async function toolSearchProject(args, root) {
-  const { query, glob: globPattern, ignoreCase = true, regex = false } = args
+  const query = String(args.query ?? '')
+  if (!query) return 'Error: query is required'
+  const flags = ['-n', '--max-count=5', '--max-depth=20']
+  if (args.ignoreCase !== false) flags.push('-i')
+  if (!args.regex) flags.push('-F')
+  if (args.glob) flags.push('--glob', String(args.glob))
+  for (const dir of IGNORE_DIRS) flags.push(`--glob=!${dir}/**`)
+  flags.push('--', query, '.')
   try {
-    // Пробуем ripgrep, fallback на grep
-    const flags = ['-n', '--max-count=5', '--max-depth=20']
-    if (ignoreCase) flags.push('-i')
-    if (!regex) flags.push('-F')
-    if (globPattern) flags.push(`--glob`, globPattern)
-    for (const d of IGNORE_DIRS) flags.push(`--glob=!${d}/**`)
-    flags.push('--', query, '.')
-
     const output = execFileSync('rg', flags, {
-      cwd: root, encoding: 'utf-8', timeout: 15_000, maxBuffer: 2 * 1024 * 1024
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 2 * 1024 * 1024
     })
-    const lines = output.trim().split('\n').slice(0, 80)
-    return lines.join('\n') || 'Совпадений не найдено'
-  } catch (e) {
-    if (e.status === 1) return 'Совпадений не найдено'
-    // fallback — простой рекурсивный поиск
-    try {
-      const results = []
-      await searchInDir(root, root, query.toLowerCase(), results, 80)
-      return results.join('\n') || 'Совпадений не найдено'
-    } catch {
-      return `Ошибка поиска: ${e.message}`
-    }
-  }
-}
-
-async function searchInDir(dir, root, query, results, maxHits) {
-  if (results.length >= maxHits) return
-  let entries
-  try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
-  for (const e of entries) {
-    if (results.length >= maxHits) return
-    const full = join(dir, e.name)
-    const rel = relative(root, full)
-    if (e.isDirectory()) {
-      if (!IGNORE_DIRS.has(e.name)) await searchInDir(full, root, query, results, maxHits)
-    } else if (e.isFile()) {
-      try {
-        const content = await readFile(full, 'utf-8')
-        const lines = content.split('\n')
-        lines.forEach((line, i) => {
-          if (results.length < maxHits && line.toLowerCase().includes(query)) {
-            results.push(`${rel}:${i + 1}: ${line.slice(0, 200)}`)
-          }
-        })
-      } catch { /* skip binary */ }
-    }
+    return output.trim().split('\n').slice(0, 80).join('\n') || 'No matches'
+  } catch (err) {
+    if (err.status === 1) return 'No matches'
+    return `Search failed: ${err.message}`
   }
 }
 
 async function toolFindFiles(args, root) {
-  const { pattern } = args
+  const pattern = String(args.pattern ?? '')
+  if (!pattern) return 'Error: pattern is required'
   try {
-    const results = []
-    await findFilesInDir(root, root, pattern, results, 100)
-    return results.join('\n') || 'Файлы не найдены'
-  } catch (e) {
-    return `Ошибка: ${e.message}`
+    const flags = ['--files']
+    for (const dir of IGNORE_DIRS) flags.push(`--glob=!${dir}/**`)
+    flags.push('--glob', pattern)
+    const output = execFileSync('rg', flags, {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 15_000,
+      maxBuffer: 2 * 1024 * 1024
+    })
+    return output.trim().split('\n').slice(0, 100).join('\n') || 'No files found'
+  } catch (err) {
+    if (err.status === 1) return 'No files found'
+    return `Find failed: ${err.message}`
   }
 }
 
-async function findFilesInDir(dir, root, pattern, results, maxHits) {
-  if (results.length >= maxHits) return
-  let entries
-  try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
-  // Простая glob-реализация: convert ** и * в regex
-  const regStr = pattern
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')  // escape
-    .replace(/\\\*\\\*/g, '.*')              // ** → .*
-    .replace(/\\\*/g, '[^/]*')               // * → [^/]*
-    .replace(/\\\?/g, '[^/]')               // ? → [^/]
-  const rx = new RegExp('^' + regStr + '$')
-  for (const e of entries) {
-    if (results.length >= maxHits) return
-    const full = join(dir, e.name)
-    const rel = relative(root, full).replace(/\\/g, '/')
-    if (e.isDirectory()) {
-      if (!IGNORE_DIRS.has(e.name)) await findFilesInDir(full, root, pattern, results, maxHits)
-    } else {
-      if (rx.test(rel) || rx.test(e.name)) results.push(rel)
-    }
-  }
+async function toolProjectMap(_args, root) {
+  return toolFindFiles({ pattern: '*' }, root)
 }
 
-async function toolApplyPatch(args, root, mode) {
-  const { path: relPath, diff } = args
-  const absPath = safeJoin(root, relPath)
-  if (isForbidden(absPath)) return `Доступ запрещён: ${relPath}`
-  if (mode === 'plan') return `[plan mode] Патч заблокирован: ${relPath}`
-  try {
-    let content = await readFile(absPath, 'utf-8')
-    // Парсим SEARCH/REPLACE блоки
-    const blockRx = /<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g
-    let match
-    let applied = 0
-    while ((match = blockRx.exec(diff)) !== null) {
-      const [, search, replace] = match
-      if (content.includes(search)) {
-        content = content.replace(search, replace)
-        applied++
-      } else {
-        return `Ошибка: блок SEARCH не найден в ${relPath}:\n${search.slice(0, 200)}`
-      }
-    }
-    if (applied === 0) return `Предупреждение: ни один блок SEARCH/REPLACE не применён`
-    writeFileSync(absPath, content, 'utf-8')
-    return `Применено ${applied} блоков в ${relPath}`
-  } catch (e) {
-    return `Ошибка: ${e.message}`
-  }
-}
-
-async function executeToolCli(name, args, root, mode) {
+async function executeTool(name, args, root, mode) {
   switch (name) {
-    case 'read_file':       return toolReadFile(args, root)
-    case 'list_directory':  return toolListDirectory(args, root)
-    case 'write_file':      return toolWriteFile(args, root, mode)
-    case 'apply_patch':     return toolApplyPatch(args, root, mode)
-    case 'run_command':     return toolRunCommand(args, root, mode)
-    case 'search_project':  return toolSearchProject(args, root)
-    case 'find_files':      return toolFindFiles(args, root)
-    case 'get_project_map':
-    case 'refresh_project_map': {
-      // Простая реализация: tree + размеры
-      const lines = []
-      await buildProjectTree(root, root, lines, 0, 4)
-      return `Структура проекта:\n${lines.join('\n')}`
-    }
-    default:
-      return `Инструмент "${name}" недоступен в CLI-режиме`
+    case 'read_file': return toolReadFile(args, root)
+    case 'list_directory': return toolListDirectory(args, root)
+    case 'write_file': return toolWriteFile(args, root, mode)
+    case 'run_command': return toolRunCommand(args, root, mode)
+    case 'search_project': return toolSearchProject(args, root)
+    case 'find_files': return toolFindFiles(args, root)
+    case 'get_project_map': return toolProjectMap(args, root)
+    default: return `Unknown tool: ${name}`
   }
 }
 
-async function buildProjectTree(dir, root, lines, depth, maxDepth) {
-  if (depth > maxDepth) return
-  let entries
-  try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
-  const indent = '  '.repeat(depth)
-  for (const e of entries) {
-    if (IGNORE_DIRS.has(e.name)) continue
-    lines.push(`${indent}${e.isDirectory() ? e.name + '/' : e.name}`)
-    if (e.isDirectory()) {
-      await buildProjectTree(join(dir, e.name), root, lines, depth + 1, maxDepth)
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Описание инструментов для провайдеров (JSON Schema)
-// ---------------------------------------------------------------------------
-
-const CLI_TOOL_DEFS = [
+const TOOL_DEFS = [
   {
     name: 'read_file',
-    description: 'Прочитать содержимое файла относительно корня проекта',
-    parameters: {
-      type: 'object',
-      properties: { path: { type: 'string', description: 'Относительный путь от корня проекта' } },
-      required: ['path']
-    }
+    description: 'Read a UTF-8 file relative to the project root.',
+    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] }
   },
   {
     name: 'list_directory',
-    description: 'Перечислить файлы и папки в директории',
-    parameters: {
-      type: 'object',
-      properties: { path: { type: 'string', description: 'Относительный путь, "." для корня' } },
-      required: ['path']
-    }
+    description: 'List files and folders in a directory relative to the project root.',
+    parameters: { type: 'object', properties: { path: { type: 'string' } } }
   },
   {
     name: 'write_file',
-    description: 'Записать содержимое файла. Используй для создания новых файлов или полной замены.',
+    description: 'Write a complete UTF-8 file relative to the project root.',
     parameters: {
       type: 'object',
-      properties: {
-        path: { type: 'string' },
-        content: { type: 'string' }
-      },
+      properties: { path: { type: 'string' }, content: { type: 'string' } },
       required: ['path', 'content']
     }
   },
   {
-    name: 'apply_patch',
-    description: 'Точечная правка файла через SEARCH/REPLACE блоки.',
-    parameters: {
-      type: 'object',
-      properties: {
-        path: { type: 'string' },
-        diff: { type: 'string', description: 'Один или несколько SEARCH/REPLACE блоков' }
-      },
-      required: ['path', 'diff']
-    }
-  },
-  {
     name: 'run_command',
-    description: 'Запустить shell-команду в корне проекта',
-    parameters: {
-      type: 'object',
-      properties: { command: { type: 'string' } },
-      required: ['command']
-    }
+    description: 'Run a shell command in the project root.',
+    parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }
   },
   {
     name: 'search_project',
-    description: 'Полнотекстовый поиск по проекту',
+    description: 'Search project text using ripgrep.',
     parameters: {
       type: 'object',
       properties: {
@@ -554,330 +341,92 @@ const CLI_TOOL_DEFS = [
   },
   {
     name: 'find_files',
-    description: 'Найти файлы по glob-паттерну',
-    parameters: {
-      type: 'object',
-      properties: { pattern: { type: 'string' } },
-      required: ['pattern']
-    }
+    description: 'Find files by glob using ripgrep.',
+    parameters: { type: 'object', properties: { pattern: { type: 'string' } }, required: ['pattern'] }
   },
   {
     name: 'get_project_map',
-    description: 'Получить структуру проекта (дерево директорий)',
+    description: 'Return a compact file list for the project.',
     parameters: { type: 'object', properties: {} }
-  },
+  }
 ]
 
-// ---------------------------------------------------------------------------
-// Провайдеры — реализации через HTTPS
-// ---------------------------------------------------------------------------
-
-// --- Gemini ---
-
-const GEMINI_MODELS = ['gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-flash']
-const GEMINI_DEFAULT = 'gemini-3.5-flash'
-
-async function* sendGemini(apiKey, model, messages, tools) {
-  // Разделяем system + history
-  const sysMsg = messages.find(m => m.role === 'system')
-  const systemInstruction = sysMsg ? { parts: [{ text: sysMsg.content }] } : undefined
-  const history = messages.filter(m => m.role !== 'system')
-
-  // Конвертируем сообщения в Gemini-формат
-  const contents = history.map(m => {
-    const role = m.role === 'assistant' ? 'model' : 'user'
-    const parts = []
-    if (m.content) parts.push({ text: m.content })
-    if (m.toolCalls?.length) {
-      for (const c of m.toolCalls) {
-        const part = { functionCall: { name: c.name, args: c.args } }
-        if (c.thoughtSignature) part.thoughtSignature = c.thoughtSignature
-        parts.push(part)
-      }
-    }
-    if (m.toolResults?.length) {
-      for (const r of m.toolResults) {
-        parts.push({
-          functionResponse: {
-            name: r.name,
-            response: r.error ? { error: r.error } : { result: r.result }
-          }
-        })
-      }
-    }
-    if (parts.length === 0) parts.push({ text: '' })
-    return { role, parts }
+function httpsPost(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url)
+    const req = https.request({
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers }
+    }, resolve)
+    req.on('error', reject)
+    req.write(JSON.stringify(body))
+    req.end()
   })
-
-  const toolDecls = tools.map(t => ({
-    name: t.name,
-    description: t.description,
-    parameters: t.parameters
-  }))
-
-  const body = {
-    contents,
-    ...(systemInstruction ? { systemInstruction } : {}),
-    ...(toolDecls.length ? { tools: [{ functionDeclarations: toolDecls }] } : {}),
-    generationConfig: { temperature: 0.2 }
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`
-  const res = await httpsPost(url, {}, body)
-
-  if (res.statusCode !== 200) {
-    const errBody = await streamResponse(res)
-    throw new Error(`Gemini HTTP ${res.statusCode}: ${errBody.slice(0, 500)}`)
-  }
-
-  // SSE stream
-  let buffer = ''
-  for await (const chunk of res) {
-    buffer += chunk.toString()
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') { yield { type: 'done' }; return }
-      try {
-        const obj = JSON.parse(data)
-        const cand = obj.candidates?.[0]
-        if (!cand) continue
-        for (const part of (cand.content?.parts ?? [])) {
-          if (part.text) yield { type: 'text', text: part.text }
-          if (part.functionCall) {
-            yield {
-              type: 'tool-call',
-              call: {
-                id: `gc-${Math.random().toString(36).slice(2)}`,
-                name: part.functionCall.name,
-                args: part.functionCall.args ?? {},
-                thoughtSignature: part.thoughtSignature,
-              }
-            }
-          }
-        }
-        if (cand.finishReason && cand.finishReason !== 'STOP') {
-          // tool calls не имеют явного stopReason TOOL_CALL в streaming
-        }
-      } catch { /* skip malformed line */ }
-    }
-  }
-  yield { type: 'done' }
 }
 
-// --- Claude (Anthropic) ---
-
-const CLAUDE_MODELS = ['claude-opus-4-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-4-5']
-const CLAUDE_DEFAULT = 'claude-opus-4-5'
-
-async function* sendClaude(apiKey, model, messages, tools) {
-  const sysContent = messages.find(m => m.role === 'system')?.content ?? ''
-  const history = messages.filter(m => m.role !== 'system')
-
-  // Конвертируем в Claude-формат
-  const claudeMsgs = []
-  for (const m of history) {
-    if (m.role === 'assistant') {
-      const blocks = []
-      if (m.content) blocks.push({ type: 'text', text: m.content })
-      if (m.toolCalls?.length) {
-        for (const c of m.toolCalls) {
-          blocks.push({ type: 'tool_use', id: c.id, name: c.name, input: c.args })
-        }
-      }
-      claudeMsgs.push({ role: 'assistant', content: blocks })
-    } else {
-      // user
-      if (m.toolResults?.length) {
-        const blocks = []
-        if (m.content) blocks.push({ type: 'text', text: m.content })
-        for (const r of m.toolResults) {
-          const text = r.error
-            ? `Error: ${r.error}\n${JSON.stringify(r.result).slice(0, 5000)}`
-            : (typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000))
-          blocks.push({ type: 'tool_result', tool_use_id: r.id, content: text })
-        }
-        claudeMsgs.push({ role: 'user', content: blocks })
-      } else {
-        claudeMsgs.push({ role: 'user', content: m.content || '' })
-      }
-    }
-  }
-
-  const claudeTools = tools.map(t => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.parameters
-  }))
-
-  const body = {
-    model,
-    max_tokens: 8192,
-    system: sysContent,
-    messages: claudeMsgs,
-    ...(claudeTools.length ? { tools: claudeTools } : {}),
-    stream: true,
-  }
-
-  const res = await httpsPost(
-    'https://api.anthropic.com/v1/messages',
-    {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'interleaved-thinking-2025-05-14'
-    },
-    body
-  )
-
-  if (res.statusCode !== 200) {
-    const errBody = await streamResponse(res)
-    throw new Error(`Claude HTTP ${res.statusCode}: ${errBody.slice(0, 500)}`)
-  }
-
-  let buffer = ''
-  let currentToolCall = null
-
-  for await (const chunk of res) {
-    buffer += chunk.toString()
-    const lines = buffer.split('\n')
-    buffer = lines.pop() ?? ''
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') { yield { type: 'done' }; return }
-      try {
-        const obj = JSON.parse(data)
-        switch (obj.type) {
-          case 'content_block_start':
-            if (obj.content_block?.type === 'tool_use') {
-              currentToolCall = { id: obj.content_block.id, name: obj.content_block.name, argsRaw: '' }
-            }
-            break
-          case 'content_block_delta':
-            if (obj.delta?.type === 'text_delta') {
-              yield { type: 'text', text: obj.delta.text }
-            }
-            if (obj.delta?.type === 'input_json_delta' && currentToolCall) {
-              currentToolCall.argsRaw += obj.delta.partial_json
-            }
-            break
-          case 'content_block_stop':
-            if (currentToolCall) {
-              let args = {}
-              try { args = JSON.parse(currentToolCall.argsRaw) } catch { /* ignore */ }
-              yield { type: 'tool-call', call: { id: currentToolCall.id, name: currentToolCall.name, args } }
-              currentToolCall = null
-            }
-            break
-          case 'message_stop':
-            yield { type: 'done' }
-            return
-        }
-      } catch { /* skip */ }
-    }
-  }
-  yield { type: 'done' }
+async function readResponse(res) {
+  let raw = ''
+  for await (const chunk of res) raw += chunk.toString()
+  return raw
 }
 
-// --- OpenAI-совместимые провайдеры ---
-
-const OPENAI_PROVIDER_CONFIGS = {
-  'openai': {
-    baseUrl: 'https://api.openai.com/v1',
-    models: ['gpt-5', 'gpt-4o', 'gpt-4o-mini', 'o1'],
-    default: 'gpt-4o',
-  },
-  'grok': {
-    baseUrl: 'https://api.x.ai/v1',
-    models: ['grok-4', 'grok-4-fast', 'grok-3'],
-    default: 'grok-4',
-  },
-  'openrouter': {
-    baseUrl: 'https://openrouter.ai/api/v1',
-    models: ['anthropic/claude-opus-4-5', 'google/gemini-3-flash', 'openai/gpt-4o'],
-    default: 'anthropic/claude-opus-4-5',
-  },
-  'deepseek': {
-    baseUrl: 'https://api.deepseek.com/v1',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
-    default: 'deepseek-chat',
-  },
-  'mistral': {
-    baseUrl: 'https://api.mistral.ai/v1',
-    models: ['mistral-large-latest', 'mistral-small-latest'],
-    default: 'mistral-large-latest',
-  },
-  'groq': {
-    baseUrl: 'https://api.groq.com/openai/v1',
-    models: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768'],
-    default: 'llama-3.3-70b-versatile',
-  },
-  'ollama': {
-    baseUrl: 'http://localhost:11434/v1',
-    models: ['llama3.2', 'codellama', 'qwen2.5-coder'],
-    default: 'llama3.2',
-  },
-}
-
-async function* sendOpenAiCompat(apiKey, baseUrl, model, messages, tools) {
-  // Конвертируем в OpenAI-формат
-  const oaiMessages = []
-  for (const m of messages) {
-    if (m.role === 'system') {
-      oaiMessages.push({ role: 'system', content: m.content })
-      continue
-    }
-    if (m.role === 'assistant') {
-      const entry = { role: 'assistant', content: m.content || '' }
-      if (m.toolCalls?.length) {
-        entry.tool_calls = m.toolCalls.map(c => ({
-          id: c.id,
+function toOpenAiMessages(messages) {
+  const out = []
+  for (const message of messages) {
+    if (message.role === 'system') {
+      out.push({ role: 'system', content: message.content })
+    } else if (message.role === 'assistant') {
+      const entry = { role: 'assistant', content: message.content || '' }
+      if (message.toolCalls?.length) {
+        entry.tool_calls = message.toolCalls.map(call => ({
+          id: call.id,
           type: 'function',
-          function: { name: c.name, arguments: JSON.stringify(c.args) }
+          function: { name: call.name, arguments: JSON.stringify(call.args ?? {}) }
         }))
       }
-      oaiMessages.push(entry)
-      continue
-    }
-    // user
-    if (m.toolResults?.length) {
-      if (m.content) oaiMessages.push({ role: 'user', content: m.content })
-      for (const r of m.toolResults) {
-        const text = r.error
-          ? `Error: ${r.error}`
-          : (typeof r.result === 'string' ? r.result : JSON.stringify(r.result).slice(0, 5000))
-        oaiMessages.push({ role: 'tool', tool_call_id: r.id, content: text })
-      }
+      out.push(entry)
+    } else if (message.role === 'tool') {
+      out.push({
+        role: 'tool',
+        tool_call_id: message.toolCallId,
+        content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+      })
     } else {
-      oaiMessages.push({ role: 'user', content: m.content || '' })
+      out.push({ role: 'user', content: message.content || '' })
     }
   }
+  return out
+}
 
-  const oaiTools = tools.map(t => ({
-    type: 'function',
-    function: { name: t.name, description: t.description, parameters: t.parameters }
-  }))
-
+async function* sendGrok({ apiKey, model, messages, tools }) {
   const body = {
-    model,
-    messages: oaiMessages,
+    model: model || DEFAULT_MODEL,
+    messages: toOpenAiMessages(messages),
     stream: true,
-    ...(oaiTools.length ? { tools: oaiTools, tool_choice: 'auto' } : {}),
+    tools: tools.map(tool => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
+      }
+    })),
+    tool_choice: 'auto'
   }
 
-  const headers = apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}
-  const res = await httpsPost(`${baseUrl}/chat/completions`, headers, body)
+  const res = await httpsPost(`${BASE_URL}/chat/completions`, {
+    Authorization: `Bearer ${apiKey}`
+  }, body)
 
   if (res.statusCode !== 200) {
-    const errBody = await streamResponse(res)
-    throw new Error(`HTTP ${res.statusCode}: ${errBody.slice(0, 500)}`)
+    const raw = await readResponse(res)
+    throw new Error(`Grok API HTTP ${res.statusCode}: ${raw.slice(0, 700)}`)
   }
 
   let buffer = ''
-  const pendingToolCalls = {}  // id → { name, argsRaw }
-
+  const pendingToolCalls = {}
   for await (const chunk of res) {
     buffer += chunk.toString()
     const lines = buffer.split('\n')
@@ -885,170 +434,116 @@ async function* sendOpenAiCompat(apiKey, baseUrl, model, messages, tools) {
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue
       const data = line.slice(6).trim()
-      if (data === '[DONE]') { yield { type: 'done' }; return }
-      try {
-        const obj = JSON.parse(data)
-        const delta = obj.choices?.[0]?.delta
-        if (!delta) continue
-        if (delta.content) yield { type: 'text', text: delta.content }
-        if (delta.tool_calls?.length) {
-          for (const tc of delta.tool_calls) {
-            const idx = String(tc.index ?? 0)
-            if (!pendingToolCalls[idx]) {
-              pendingToolCalls[idx] = {
-                id: tc.id ?? `tc-${idx}`,
-                name: tc.function?.name ?? '',
-                argsRaw: ''
-              }
-            }
-            if (tc.id) pendingToolCalls[idx].id = tc.id
-            if (tc.function?.name) pendingToolCalls[idx].name += tc.function.name
-            if (tc.function?.arguments) pendingToolCalls[idx].argsRaw += tc.function.arguments
+      if (!data || data === '[DONE]') continue
+      let obj
+      try { obj = JSON.parse(data) } catch { continue }
+      const choice = obj.choices?.[0]
+      const delta = choice?.delta
+      if (delta?.content) yield { type: 'text', text: delta.content }
+      if (delta?.tool_calls?.length) {
+        for (const toolCall of delta.tool_calls) {
+          const idx = String(toolCall.index ?? 0)
+          if (!pendingToolCalls[idx]) {
+            pendingToolCalls[idx] = { id: toolCall.id ?? `tc-${idx}`, name: '', argsRaw: '' }
           }
+          if (toolCall.id) pendingToolCalls[idx].id = toolCall.id
+          if (toolCall.function?.name) pendingToolCalls[idx].name += toolCall.function.name
+          if (toolCall.function?.arguments) pendingToolCalls[idx].argsRaw += toolCall.function.arguments
         }
-        const finishReason = obj.choices?.[0]?.finish_reason
-        if (finishReason === 'tool_calls' || (finishReason === 'stop' && Object.keys(pendingToolCalls).length)) {
-          for (const [, tc] of Object.entries(pendingToolCalls)) {
-            let args = {}
-            try { args = JSON.parse(tc.argsRaw) } catch { /* ignore */ }
-            yield { type: 'tool-call', call: { id: tc.id, name: tc.name, args } }
-          }
-          // Очищаем — но не выходим, поток может продолжаться
-          for (const k of Object.keys(pendingToolCalls)) delete pendingToolCalls[k]
+      }
+      const finish = choice?.finish_reason
+      if (finish === 'tool_calls') {
+        for (const call of Object.values(pendingToolCalls)) {
+          let args = {}
+          try { args = JSON.parse(call.argsRaw || '{}') } catch {}
+          yield { type: 'tool-call', call: { id: call.id, name: call.name, args } }
         }
-        if (finishReason === 'stop') { yield { type: 'done' }; return }
-      } catch { /* skip */ }
+        return
+      }
+      if (finish === 'stop') {
+        yield { type: 'done' }
+        return
+      }
     }
-  }
-  // Flush remaining tool calls
-  for (const [, tc] of Object.entries(pendingToolCalls)) {
-    let args = {}
-    try { args = JSON.parse(tc.argsRaw) } catch { /* ignore */ }
-    yield { type: 'tool-call', call: { id: tc.id, name: tc.name, args } }
   }
   yield { type: 'done' }
 }
 
-// ---------------------------------------------------------------------------
-// Маршрутизация провайдера
-// ---------------------------------------------------------------------------
-
-function getProviderStream(provider, apiKey, model, messages, tools) {
-  switch (provider) {
-    case 'gemini-api':
-      return sendGemini(apiKey, model ?? GEMINI_DEFAULT, messages, tools)
-    case 'claude':
-      return sendClaude(apiKey, model ?? CLAUDE_DEFAULT, messages, tools)
-    default: {
-      const cfg = OPENAI_PROVIDER_CONFIGS[provider]
-      if (!cfg) throw new Error(`Неизвестный провайдер: "${provider}". Используйте --help для списка.`)
-      return sendOpenAiCompat(apiKey, cfg.baseUrl, model ?? cfg.default, messages, tools)
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Основной агентный цикл
-// ---------------------------------------------------------------------------
-
-async function runAgent({ provider, model, apiKey, projectPath, mode, json: jsonMode, prompt }) {
-  const systemPrompt = buildSystemPrompt(projectPath)
+async function runAgent({ apiKey, model, root, mode, jsonMode, prompt }) {
   const messages = [
-    { role: 'system', content: systemPrompt },
+    { role: 'system', content: buildSystemPrompt(root) },
     { role: 'user', content: prompt }
   ]
-
-  const allAssistantTexts = []
-  const MAX_TURNS = 20
+  const assistantTexts = []
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     let fullText = ''
     const toolCalls = []
 
-    const stream = getProviderStream(provider, apiKey, model, messages, CLI_TOOL_DEFS)
-
-    for await (const event of stream) {
+    for await (const event of sendGrok({ apiKey, model, messages, tools: TOOL_DEFS })) {
       if (event.type === 'text') {
         fullText += event.text
         if (!jsonMode) process.stdout.write(event.text)
-      }
-      if (event.type === 'tool-call') {
+      } else if (event.type === 'tool-call') {
         toolCalls.push(event.call)
+      } else if (event.type === 'done') {
+        break
       }
-      if (event.type === 'error') {
-        if (!jsonMode) process.stderr.write(`\nОшибка провайдера: ${event.message}\n`)
-        process.exit(1)
-      }
-      if (event.type === 'done') break
     }
 
-    if (fullText) allAssistantTexts.push(fullText)
+    if (fullText) assistantTexts.push(fullText)
+    const assistantMessage = { role: 'assistant', content: fullText }
+    if (toolCalls.length) assistantMessage.toolCalls = toolCalls
+    messages.push(assistantMessage)
 
-    // Собираем assistant message
-    const assistantMsg = { role: 'assistant', content: fullText }
-    if (toolCalls.length) assistantMsg.toolCalls = toolCalls
-    messages.push(assistantMsg)
-
-    // Нет tool calls — агент завершил работу
     if (toolCalls.length === 0) break
 
-    // Выводим сообщение о вызовах инструментов (не в json-режиме)
-    if (!jsonMode) {
-      process.stderr.write(`\n[${toolCalls.map(c => c.name).join(', ')}]\n`)
-    }
-
-    // Выполняем инструменты
-    const toolResults = []
+    if (!jsonMode) process.stderr.write(`\n[tools: ${toolCalls.map(c => c.name).join(', ')}]\n`)
     for (const call of toolCalls) {
       let result
       try {
-        result = await executeToolCli(call.name, call.args, projectPath, mode)
-      } catch (e) {
-        result = `Ошибка: ${e.message}`
+        result = await executeTool(call.name, call.args ?? {}, root, mode)
+      } catch (err) {
+        result = `Tool error: ${err.message}`
       }
-      toolResults.push({ id: call.id, name: call.name, result })
+      messages.push({
+        role: 'tool',
+        toolCallId: call.id,
+        content: typeof result === 'string' ? result : JSON.stringify(result)
+      })
     }
-
-    // Добавляем результаты как user-сообщение
-    messages.push({ role: 'user', content: '', toolResults })
   }
 
-  if (!jsonMode) {
-    // Финальный перенос строки если вывод не заканчивается на \n
-    if (allAssistantTexts.length && !allAssistantTexts.at(-1).endsWith('\n')) {
-      process.stdout.write('\n')
-    }
-  } else {
-    const output = {
+  if (jsonMode) {
+    console.log(JSON.stringify({
       success: true,
-      provider,
-      model: model ?? '(default)',
-      projectPath,
+      provider: 'grok',
+      model: model || DEFAULT_MODEL,
+      projectPath: root,
       prompt,
-      response: allAssistantTexts.join('\n'),
-      messages: messages.filter(m => m.role !== 'system'),
-    }
-    console.log(JSON.stringify(output, null, 2))
+      response: assistantTexts.join('\n'),
+      messages: messages.filter(m => m.role !== 'system')
+    }, null, 2))
+  } else if (assistantTexts.length && !assistantTexts.at(-1).endsWith('\n')) {
+    process.stdout.write('\n')
   }
 }
 
-// ---------------------------------------------------------------------------
-// Точка входа
-// ---------------------------------------------------------------------------
-
 try {
-  const apiKey = resolveApiKey(values.provider, values.key)
+  const model = values.model || DEFAULT_MODEL
+  if (!GROK_MODELS.includes(model)) {
+    throw new Error(`Unsupported Grok model "${model}". Supported: ${GROK_MODELS.join(', ')}`)
+  }
   await runAgent({
-    provider: values.provider,
-    model: values.model,
-    apiKey,
-    projectPath,
+    apiKey: resolveApiKey(values.key),
+    model,
+    root: projectPath,
     mode: values.mode,
-    json: values.json,
-    prompt,
+    jsonMode: values.json,
+    prompt
   })
   process.exit(0)
 } catch (err) {
-  console.error(`\nОшибка: ${err.message}`)
+  console.error(`\nError: ${err.message}`)
   process.exit(1)
 }

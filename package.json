@@ -1,7 +1,7 @@
 {
   "name": "grok-desktop",
   "version": "0.1.0",
-  "description": "Grok Desktop — AI coding agent for Grok (xAI): Grok API + Grok Build CLI, full control & transparency, skills, artifacts",
+  "description": "Desktop AI coding agent for Grok (xAI) and Grok Build. Local-first, secure, skills-first.",
   "main": "out/main/main.mjs",
   "scripts": {
     "dev": "electron-vite dev",
@@ -23,7 +23,7 @@
   "build": {
     "appId": "ru.grokdesktop.app",
     "productName": "Grok Desktop",
-    "copyright": "Copyright © 2026 Pavel Frolov",
+    "copyright": "Copyright (c) 2026 Pavel Frolov",
     "directories": {
       "output": "release",
       "buildResources": "resources"
@@ -97,8 +97,16 @@
   "bin": {
     "grok-desktop": "./scripts/grok-desktop-cli.mjs"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "grok",
+    "xai",
+    "grok-build",
+    "electron",
+    "ai-coding-agent",
+    "local-first",
+    "developer-tools"
+  ],
+  "author": "Pavel Frolov",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -123,11 +131,9 @@
     "vitest": "^4.1.6"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.97.0",
     "@fontsource/geist-mono": "^5.2.8",
     "@fontsource/geist-sans": "^5.2.5",
     "@fontsource/jetbrains-mono": "^5.2.8",
-    "@google/genai": "^2.4.0",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "better-sqlite3": "^12.10.0",
     "diff": "^9.0.0",
