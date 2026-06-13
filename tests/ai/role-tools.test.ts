@@ -69,22 +69,43 @@ describe('getRoleToolset — whitelist по роли', () => {
     })
   })
 
-  describe('delegate-tools исключены ВСЕГДА (защита от рекурсии)', () => {
-    for (const role of ['researcher', 'critic', 'planner', 'verifier', 'executor', null, 'unknown']) {
-      it(`роль ${role ?? 'default'}: нет delegate_task / delegate_parallel`, () => {
-        const toolset = getRoleToolset(role)
+  describe('delegate-tools — условно-разрешены субам под лимитом глубины (Фаза 4, Идея 3)', () => {
+    // ВНИМАНИЕ: контракт изменился в Фазе 4. Раньше delegate_* были запрещены
+    // субам ВСЕГДА. Теперь executor/researcher/planner на глубине < MAX могут
+    // делегировать дальше; на предельной глубине — нет. critic/verifier — листовые.
+    it('executor/researcher/planner на глубине 1 (< MAX=2) получают delegate_*', () => {
+      for (const role of ['executor', 'researcher', 'planner']) {
+        const toolset = getRoleToolset(role, { depth: 1 })
+        expect(toolset).toContain('delegate_task')
+        expect(toolset).toContain('delegate_parallel')
+      }
+    })
+    it('на предельной глубине (depth=2=MAX) delegate_* недоступен (нет рекурсии)', () => {
+      for (const role of ['executor', 'researcher', 'planner']) {
+        const toolset = getRoleToolset(role, { depth: 2 })
         expect(toolset).not.toContain('delegate_task')
         expect(toolset).not.toContain('delegate_parallel')
-      })
-    }
-    it('SUBAGENT_FORBIDDEN_TOOLS содержит оба delegate-тула', () => {
-      expect(SUBAGENT_FORBIDDEN_TOOLS.has('delegate_task')).toBe(true)
-      expect(SUBAGENT_FORBIDDEN_TOOLS.has('delegate_parallel')).toBe(true)
+      }
     })
-    it('orchestrate тоже запрещён субам (Фаза 3 — вызывает только главный агент)', () => {
+    it('critic/verifier — листовые: delegate_* не получают даже на малой глубине', () => {
+      for (const role of ['critic', 'verifier']) {
+        const toolset = getRoleToolset(role, { depth: 0 })
+        expect(toolset).not.toContain('delegate_task')
+        expect(toolset).not.toContain('delegate_parallel')
+      }
+    })
+    it('SUBAGENT_FORBIDDEN_TOOLS больше НЕ содержит delegate-тулы (они под гейтом глубины)', () => {
+      expect(SUBAGENT_FORBIDDEN_TOOLS.has('delegate_task')).toBe(false)
+      expect(SUBAGENT_FORBIDDEN_TOOLS.has('delegate_parallel')).toBe(false)
+    })
+    it('orchestrate / swarm запрещены субам ВСЕГДА (только главный агент)', () => {
       expect(SUBAGENT_FORBIDDEN_TOOLS.has('orchestrate')).toBe(true)
+      expect(SUBAGENT_FORBIDDEN_TOOLS.has('swarm')).toBe(true)
       for (const role of ['researcher', 'critic', 'planner', 'verifier', 'executor', null]) {
-        expect(getRoleToolset(role)).not.toContain('orchestrate')
+        for (const depth of [0, 1, 2]) {
+          expect(getRoleToolset(role, { depth })).not.toContain('orchestrate')
+          expect(getRoleToolset(role, { depth })).not.toContain('swarm')
+        }
       }
     })
   })

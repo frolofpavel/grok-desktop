@@ -37,6 +37,42 @@ function fmtCost(cents: number | null): string | null {
   return `$${(cents / 100).toFixed(2)}`
 }
 
+/**
+ * Дерево делегирования (Фаза 4, Идея 3): раскладывает плоский список суб-сессий
+ * в иерархию main → суб → под-суб по связи callId ↔ parentCallId. Возвращает
+ * упорядоченный pre-order список с уровнем отступа на каждый узел. Узлы без
+ * родителя (parentCallId == null) или с неизвестным родителем — корни (дети
+ * главного агента). Защита от циклов: посещённые callId не разворачиваются дважды.
+ */
+function buildAgentTree(subs: SubSession[]): Array<{ sub: SubSession; level: number }> {
+  const byParent = new Map<string, SubSession[]>()
+  const knownCallIds = new Set(subs.map(s => s.callId).filter(Boolean) as string[])
+  const roots: SubSession[] = []
+  for (const s of subs) {
+    const parent = s.parentCallId
+    if (parent && knownCallIds.has(parent)) {
+      const arr = byParent.get(parent) ?? []
+      arr.push(s)
+      byParent.set(parent, arr)
+    } else {
+      roots.push(s)
+    }
+  }
+  const out: Array<{ sub: SubSession; level: number }> = []
+  const visited = new Set<number>()
+  const walk = (s: SubSession, level: number) => {
+    if (visited.has(s.id)) return  // защита от циклов
+    visited.add(s.id)
+    out.push({ sub: s, level })
+    const children = s.callId ? byParent.get(s.callId) ?? [] : []
+    for (const c of children) walk(c, level + 1)
+  }
+  for (const r of roots) walk(r, 0)
+  // На случай орфанов из цикла — добавим непосещённые в конец как корни.
+  for (const s of subs) if (!visited.has(s.id)) walk(s, 0)
+  return out
+}
+
 // Просмотр истории суб-сессии (read-only) — модалка поверх панели.
 function SubSessionViewer({ sub, onClose, onBring }: { sub: SubSession; onClose: () => void; onBring: (text: string) => void }) {
   const [messages, setMessages] = useState<StoredChatMessage[]>([])
@@ -130,6 +166,15 @@ export function AgentsPanel() {
     (!statusFilter || s.status === statusFilter)
   ), [subs, roleFilter, providerFilter, statusFilter])
 
+  // Дерево делегирования: когда фильтры не активны — показываем иерархию
+  // main → суб → под-суб с отступами. С активным фильтром структура рвётся,
+  // поэтому показываем плоско (level 0).
+  const treeActive = !roleFilter && !providerFilter && !statusFilter
+  const tree = useMemo(
+    () => treeActive ? buildAgentTree(filtered) : filtered.map(sub => ({ sub, level: 0 })),
+    [filtered, treeActive]
+  )
+
   const runningCount = subs.filter(s => s.status === 'running').length
 
   // Притащить результат суба в композер основного чата (переиспользуем
@@ -214,14 +259,23 @@ export function AgentsPanel() {
           </div>
         )}
         <div className="gg-run-list">
-          {filtered.map(s => {
+          {tree.map(({ sub: s, level }) => {
             const cost = fmtCost(s.costCents)
+            // Узлы роя помечаются по sub_group (callId роя в group). Здесь —
+            // эвристика: задача начинается с [swarm]. Бейдж 🐝 для наглядности.
+            const isSwarm = (s.task ?? '').startsWith('[swarm')
             return (
-              <div key={s.id} className={`gg-agent-card is-${s.status}`}>
+              <div
+                key={s.id}
+                className={`gg-agent-card is-${s.status}${level > 0 ? ' is-child' : ''}`}
+                style={level > 0 ? { marginLeft: level * 18 } : undefined}
+              >
                 <button className="gg-agent-card-main" onClick={() => setViewing(s)}>
+                  {level > 0 && <span className="gg-agent-tree-branch" aria-hidden>↳</span>}
                   <span className={`gg-agent-status-dot is-${s.status}`} />
-                  <span className="gg-agent-role">{s.role ?? 'sub-agent'}</span>
+                  <span className="gg-agent-role">{isSwarm ? '🐝 ' : ''}{s.role ?? 'sub-agent'}</span>
                   <span className="gg-agent-provider">{s.providerId ?? '?'}{s.model ? ` · ${s.model}` : ''}</span>
+                  {s.depth != null && s.depth > 0 && <span className="gg-agent-depth" title="глубина в дереве делегирования">d{s.depth}</span>}
                   <span className="gg-agent-task" title={s.task ?? ''}>{s.task ?? ''}</span>
                   <span className="gg-agent-meta">
                     {STATUS_LABEL[s.status ?? ''] ?? s.status}

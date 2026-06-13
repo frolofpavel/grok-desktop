@@ -11,6 +11,7 @@ import { compactToolHistory, shouldAutoCompact, buildCompactSummaryPrompt, creat
 import { estimateTokens } from '../ai/context-limits'
 import { withInitialRetry } from '../ai/with-retry'
 import { createCostGuard } from '../ai/cost-guard'
+import { SessionAgentCounter } from '../ai/delegation-limits'
 import type { AgentMode } from '../ai/mode-policy'
 import type { ChatMessage, ToolCall, ToolResult, ChatProvider, Attachment } from '../ai/types'
 import { lookupHandler, type ToolContext, type TaggedSender as HandlerTaggedSender } from './tool-handlers'
@@ -656,6 +657,10 @@ async function runApiConversation(
   // returns abnormally (uncaught exception during streaming) the journal
   // still captures it. Per Gemini audit 2.2 + Idea B.
   let exitReason: ExitReason = 'crashed'
+  // Дерево делегирования (Фаза 4, Идея 3): один счётчик агентов на весь прогон
+  // (ai:send). Прокидывается во ВСЕ вложенные субы через ctx.agentCounter →
+  // общий потолок MAX_TOTAL_AGENTS_PER_SESSION на всё дерево, а не на ветку.
+  const agentCounter = new SessionAgentCounter()
 
   try {
 
@@ -833,7 +838,12 @@ async function runApiConversation(
       parentChatId,
       subSessions,
       // TodoGate (Фаза 3): оркестрационный todo-лист сессии.
-      sessionTodos
+      sessionTodos,
+      // Дерево делегирования (Фаза 4): главный агент — depth 0, без родителя.
+      // Счётчик агентов один на весь прогон → общий потолок на всё дерево.
+      delegationDepth: 0,
+      parentCallId: null,
+      agentCounter
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []

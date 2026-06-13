@@ -117,6 +117,15 @@ export interface ToolContext {
   subModel?: string
   /** ID главного чата — родитель для персистентных суб-сессий (Фаза 2). */
   parentChatId?: number | null
+  /** Глубина агента в дереве делегирования (Фаза 4, Идея 3). Главный=0, его
+   *  суб=1, под-суб=2. delegate_* гейтятся по depth < MAX_DELEGATION_DEPTH. */
+  delegationDepth?: number
+  /** callId агента-родителя в дереве (Фаза 4) — связывает узлы для визуализации
+   *  иерархии в панели Agents. null/undefined у субов главного агента. */
+  parentCallId?: string | null
+  /** Счётчик всех суб-агентов прогона (Фаза 4) — общий потолок на всё дерево,
+   *  а не на отдельную ветку. Один инстанс на ai:send. */
+  agentCounter?: import('../ai/delegation-limits').SessionAgentCounter
   /** Фасад TodoGate (Фаза 3, Идея 2) — оркестрационный todo-лист сессии.
    *  Опционально: без него todo_* tools вернут понятную ошибку. */
   sessionTodos?: {
@@ -128,7 +137,7 @@ export interface ToolContext {
   /** Фасад персистентных суб-сессий (Фаза 2, Идея 1). Опционально — без него
    *  субагенты работают как прежде (только эфемерная карточка). */
   subSessions?: {
-    create: (opts: { projectPath: string; parentChatId: number | null; role?: string | null; task?: string | null; group?: string | null; callId?: string | null; providerId?: string | null; model?: string | null }) => number
+    create: (opts: { projectPath: string; parentChatId: number | null; role?: string | null; task?: string | null; group?: string | null; callId?: string | null; providerId?: string | null; model?: string | null; depth?: number | null; parentCallId?: string | null }) => number
     update: (id: number, patch: { status?: string; toolCount?: number; costCents?: number; endedAt?: number }) => void
     /** Сохранить одно сообщение turn суба (user/assistant) в историю сессии. */
     appendMessage: (subSessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => void
@@ -601,6 +610,18 @@ const delegateTaskHandler: ToolHandler = {
         return { id: call.id, name: call.name, result: '', error: 'delegate_task: prompt обязателен' }
       }
 
+      // Фаза 4 (Идея 3): гейт глубины + общего числа агентов. Главный агент имеет
+      // depth=0; каждый суб увеличивает depth на 1. Если глубина исчерпана или
+      // достигнут потолок числа агентов — отказываем понятной ошибкой. Резерв
+      // считается ДО запуска, чтобы вложенное дерево не обошло лимит.
+      const depth = ctx.delegationDepth ?? 0
+      if (ctx.agentCounter) {
+        const gate = ctx.agentCounter.tryReserve(depth, 1)
+        if (!gate.allowed) {
+          return { id: call.id, name: call.name, result: '', error: `delegate_task: ${gate.reason}` }
+        }
+      }
+
       // Скилл — опционально. Если задан, тащим его системный промпт + default provider/model.
       const skills = ctx.skillRegistry ? ctx.skillRegistry.list() : []
       const skill = skillId ? skills.find(s => s.id === skillId) ?? null : null
@@ -663,7 +684,8 @@ const delegateTaskHandler: ToolHandler = {
             parentChatId: ctx.parentChatId ?? null,
             role, task: prompt, callId: call.id,
             providerId: subProvider ?? ctx.currentProviderId ?? null,
-            model: subModel ?? null
+            model: subModel ?? null,
+            depth: depth + 1, parentCallId: ctx.parentCallId ?? null
           })
           ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', prompt)
         } catch { /* persist не критично — карточка всё равно покажется */ }
@@ -727,12 +749,16 @@ const delegateTaskHandler: ToolHandler = {
           cwd: ctx.projectPath,
           signal: taskAc.signal
         })
-        // Whitelist tools по роли (если роль не задана — read-only default).
-        const allowedTools = getRoleToolset(role)
+        // Whitelist tools по роли + глубине суба (Фаза 4): на разрешённой глубине
+        // суб-исполнитель получает delegate_* и может строить поддерево.
+        const allowedTools = getRoleToolset(role, { depth: depth + 1 })
         const subCtx: ToolContext = {
           ...ctx,
           subProviderId: fallbackProvider as ProviderId,
-          subModel: subModel ?? descriptor.defaultModel
+          subModel: subModel ?? descriptor.defaultModel,
+          // Дерево делегирования: суб глубже на 1, его родитель — этот вызов.
+          delegationDepth: depth + 1,
+          parentCallId: call.id
         }
         const messages = [
           { role: 'system' as const, content: systemPrompt },
@@ -791,6 +817,17 @@ const delegateParallelHandler: ToolHandler = {
       const MAX_PARALLEL = 50
       if (tasks.length > MAX_PARALLEL) {
         return { id: call.id, name: call.name, result: '', error: `delegate_parallel: максимум ${MAX_PARALLEL} задач в одном батче` }
+      }
+
+      // Фаза 4 (Идея 3): гейт глубины + общего числа агентов. Резервируем сразу
+      // ВЕСЬ батч (tasks.length) — если квота/глубина не позволяют, не стартуем
+      // вообще (иначе вложенный fan-out обошёл бы потолок). depth берётся из ctx.
+      const depth = ctx.delegationDepth ?? 0
+      if (ctx.agentCounter) {
+        const gate = ctx.agentCounter.tryReserve(depth, tasks.length)
+        if (!gate.allowed) {
+          return { id: call.id, name: call.name, result: '', error: `delegate_parallel: ${gate.reason}` }
+        }
       }
 
       // Группа/тег батча — для массовой отмены «по тегу» (Идея 6). Если не задан
@@ -871,7 +908,8 @@ const delegateParallelHandler: ToolHandler = {
               projectPath: ctx.projectPath,
               parentChatId: ctx.parentChatId ?? null,
               role: task.role ?? null, task: task.prompt, group: groupTag, callId: subCallId,
-              providerId, model: task.model ?? null
+              providerId, model: task.model ?? null,
+              depth: depth + 1, parentCallId: ctx.parentCallId ?? null
             })
             ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', task.prompt)
           } catch { /* persist не критично */ }
@@ -944,13 +982,16 @@ const delegateParallelHandler: ToolHandler = {
             { role: 'system' as const, content: systemContent },
             { role: 'user' as const, content: task.prompt }
           ]
-          // Whitelist tools по роли задачи (нет роли → read-only default).
-          const allowedTools = getRoleToolset(task.role)
+          // Whitelist tools по роли задачи + глубине (Фаза 4): суб-исполнитель
+          // на разрешённой глубине может делегировать дальше.
+          const allowedTools = getRoleToolset(task.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
             ...ctx,
             signal: taskAc.signal,
             subProviderId: providerId as ProviderId,
-            subModel
+            subModel,
+            delegationDepth: depth + 1,
+            parentCallId: subCallId
           }
           const res = await runSubAgentLoop({
             provider, messages, allowedToolNames: allowedTools, ctx: subCtx,
@@ -1139,6 +1180,16 @@ const orchestrateHandler: ToolHandler = {
       const batchStartCents = ctx.subCostGuard?.current() ?? 0
       let batchCapped = false
 
+      // Фаза 4: оркестратор работает на глубине главного агента (depth 0) и
+      // порождает субов depth 1. Резервируем всё дерево подзадач в общий счётчик.
+      const depth = ctx.delegationDepth ?? 0
+      if (ctx.agentCounter) {
+        const gate = ctx.agentCounter.tryReserve(depth, subtasks.length)
+        if (!gate.allowed) {
+          return { id: call.id, name: call.name, result: '', error: `orchestrate: ${gate.reason}` }
+        }
+      }
+
       // 3) Параллельный запуск подзадач с умным выбором модели на каждую.
       const results = await Promise.allSettled(subtasks.map(async (task) => {
         // Smart-router: оцениваем сложность подзадачи по её промпту → модель.
@@ -1162,7 +1213,8 @@ const orchestrateHandler: ToolHandler = {
             subSessionId = ctx.subSessions.create({
               projectPath: ctx.projectPath, parentChatId: ctx.parentChatId ?? null,
               role: task.role, task: task.prompt, group: groupTag, callId: subCallId,
-              providerId: baseProviderId, model: subModel
+              providerId: baseProviderId, model: subModel,
+              depth: depth + 1, parentCallId: ctx.parentCallId ?? call.id
             })
             ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', task.prompt)
           } catch { /* persist не критично */ }
@@ -1207,10 +1259,12 @@ const orchestrateHandler: ToolHandler = {
           // главный агент получал сжатые выводы, а не простыни при 20+ субах.
           const rolePrompt = getRolePrompt(task.role) ?? 'Ты — sub-agent с доступом к инструментам.'
           const systemContent = `${rolePrompt}\n\nВ финале дай СТРУКТУРИРОВАННЫЙ итог тремя короткими блоками:\nСДЕЛАЛ: ...\nНАШЁЛ: ...\nРЕКОМЕНДУЮ: ...\nКлючевые находки сохраняй через memory_save (если доступен).`
-          const allowedTools = getRoleToolset(task.role)
+          const allowedTools = getRoleToolset(task.role, { depth: depth + 1 })
           const subCtx: ToolContext = {
             ...ctx, signal: taskAc.signal,
-            subProviderId: baseProviderId as ProviderId, subModel
+            subProviderId: baseProviderId as ProviderId, subModel,
+            delegationDepth: depth + 1,
+            parentCallId: subCallId
           }
           const res = await runSubAgentLoop({
             provider, messages: [
@@ -1263,6 +1317,273 @@ const orchestrateHandler: ToolHandler = {
       const capNote = batchCapped ? `\n\n---\n\n⚠️ Оркестратор остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)}.` : ''
       const header = `🧭 Оркестратор разбил цель на ${subtasks.length} подзадач (${successCount} успешно). Сводка выводов:\n\n`
       return { id: call.id, name: call.name, result: header + blocks + capNote }
+    } catch (err) {
+      return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+}
+
+// ============================================================================
+// swarm — Agent Swarms с консенсусом-арбитром (Фаза 4, Идея 10)
+// ============================================================================
+
+export interface SwarmMember { id: string; role: string; angle: string }
+
+/**
+ * Чистый билдер ростера роя: одна цель → N агентов, атакующих её с РАЗНЫХ углов.
+ * В отличие от orchestrate (декомпозиция на подзадачи) рой делает N независимых
+ * ПОПЫТОК решить ту же цель целиком + критика. Углы детерминированы (тестируется).
+ *
+ * Состав для size=4: 2 executor с разными стратегиями + 1 researcher + 1 critic.
+ * Масштабируется: лишние слоты — дополнительные executor-варианты с новыми углами.
+ */
+export function buildSwarmRoster(size: number): SwarmMember[] {
+  const n = Math.max(2, Math.min(8, Math.floor(size) || 4))
+  // Углы-стратегии для executor-вариантов — разные «характеры» решения.
+  const angles = [
+    'самое прямое и минимальное решение',
+    'максимально надёжное решение с проверкой edge cases',
+    'решение с упором на читаемость и поддерживаемость',
+    'нестандартный подход — найди обходной/более простой путь',
+    'решение с упором на производительность',
+    'решение с упором на безопасность и валидацию входных данных'
+  ]
+  const members: SwarmMember[] = []
+  // Первый слот — researcher (соберёт контекст под общую цель).
+  members.push({ id: 'scout', role: 'researcher', angle: 'разведка: собери релевантный контекст и ограничения для цели' })
+  // Последний слот — critic (оценит варианты независимо).
+  // Между ними — executor-варианты с разными углами.
+  const executorSlots = n - 2  // минус researcher и critic
+  for (let i = 0; i < executorSlots; i++) {
+    members.push({ id: `solver-${i + 1}`, role: 'executor', angle: angles[i % angles.length] })
+  }
+  members.push({ id: 'critic', role: 'critic', angle: 'найди слабые места во всех подходах к цели' })
+  return members
+}
+
+const swarmHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    try {
+      const goal = String(call.args.goal ?? '').trim()
+      if (!goal) {
+        return { id: call.id, name: call.name, result: '', error: 'swarm: goal обязателен' }
+      }
+      const strategy = call.args.strategy ? String(call.args.strategy).trim() : ''
+      const roster = buildSwarmRoster(typeof call.args.size === 'number' ? call.args.size : 4)
+      const batchCapCents = typeof call.args.cost_cap_usd === 'number' && call.args.cost_cap_usd > 0
+        ? Math.round(call.args.cost_cap_usd * 100)
+        : DEFAULT_BATCH_COST_CAP_CENTS
+
+      const { createProvider, PROVIDERS } = await import('../ai/registry')
+      const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
+      const { getRoleToolset } = await import('../ai/role-tools')
+      const { getRolePrompt } = await import('../ai/agent-roles')
+      const { subAgentQueue } = await import('../ai/sub-queue')
+
+      const baseProviderId = ctx.currentProviderId ?? 'grok'
+      const descriptor = PROVIDERS[baseProviderId as keyof typeof PROVIDERS]
+      if (!descriptor) {
+        return { id: call.id, name: call.name, result: '', error: `swarm: неизвестный provider ${baseProviderId}` }
+      }
+      const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
+      if (descriptor.secretKey && !apiKey) {
+        return { id: call.id, name: call.name, result: '', error: `swarm: нет API key для ${baseProviderId}` }
+      }
+
+      // Фаза 4 (Идея 3): резервируем весь рой + арбитра в общий счётчик агентов.
+      // Рой работает на depth главного агента; его члены — depth+1.
+      const depth = ctx.delegationDepth ?? 0
+      if (ctx.agentCounter) {
+        const gate = ctx.agentCounter.tryReserve(depth, roster.length + 1) // +1 арбитр
+        if (!gate.allowed) {
+          return { id: call.id, name: call.name, result: '', error: `swarm: ${gate.reason}` }
+        }
+      }
+
+      // Группа батча = callId роя (массовая отмена через панель). UI пометит группу.
+      const groupTag = call.id
+      const batchStartCents = ctx.subCostGuard?.current() ?? 0
+      let batchCapped = false
+
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'tool-activity', callId: call.id, name: 'swarm', label: 'swarm', detail: `рой из ${roster.length} + арбитр · ${baseProviderId}`, status: 'ok' }
+      })
+
+      const runMember = async (m: SwarmMember) => {
+        const subCallId = `${call.id}:${m.id}`
+        let toolCount = 0
+        const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
+          ctx.sender.send('ai:event', {
+            id: ctx.sendId,
+            event: { type: 'subagent-run', callId: subCallId, label: `🐝 ${m.role}/${m.id}`, provider: baseProviderId, role: m.role, swarm: groupTag, toolCount, task: goal, status, result }
+          })
+        }
+        emitSubagent('running')
+
+        let subSessionId: number | null = null
+        if (ctx.subSessions) {
+          try {
+            subSessionId = ctx.subSessions.create({
+              projectPath: ctx.projectPath, parentChatId: ctx.parentChatId ?? null,
+              role: m.role, task: `[swarm] ${goal}`, group: groupTag, callId: subCallId,
+              providerId: baseProviderId, model: descriptor.defaultModel,
+              depth: depth + 1, parentCallId: ctx.parentCallId ?? call.id
+            })
+            ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', goal)
+          } catch { /* persist не критично */ }
+        }
+        const finalizeSub = (status: string, assistant?: string) => {
+          if (subSessionId == null || !ctx.subSessions) return
+          try {
+            if (assistant) ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'assistant', assistant)
+            ctx.subSessions.update(subSessionId, { status, toolCount, endedAt: Date.now() })
+          } catch { /* persist не критично */ }
+        }
+
+        const taskAc = new AbortController()
+        const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
+        const parentAbortHandler = () => taskAc.abort()
+        ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+
+        let queueSlot: { release: () => void; ticketId: number } | null = null
+        try {
+          queueSlot = await subAgentQueue.enter({ group: groupTag, role: m.role, abort: () => taskAc.abort() }, taskAc.signal)
+        } catch {
+          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler)
+          emitSubagent('error', 'отменён в очереди'); finalizeSub('cancelled')
+          throw new Error('отменён в очереди')
+        }
+        if (batchCapped) {
+          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); queueSlot.release()
+          emitSubagent('error', 'остановлен по cost-cap'); finalizeSub('cancelled')
+          throw new Error('остановлен по cost-cap')
+        }
+
+        try {
+          const provider = createProvider(baseProviderId as keyof typeof PROVIDERS, {
+            apiKey, model: descriptor.defaultModel, cwd: ctx.projectPath, signal: taskAc.signal
+          })
+          const rolePrompt = getRolePrompt(m.role) ?? 'Ты — sub-agent с доступом к инструментам.'
+          // Угол/стратегия члена роя + общая стратегия-подсказка → разнообразие попыток.
+          const strategyLine = strategy ? `\nОбщая стратегия роя: ${strategy}.` : ''
+          const systemContent = `${rolePrompt}\n\nТы — участник РОЯ агентов, работающих над ОДНОЙ целью независимо. Твой угол: ${m.angle}.${strategyLine}\n\nДай законченный вариант решения/вывода по цели целиком (не часть). В финале — краткий итог: ПОДХОД / РЕЗУЛЬТАТ / РИСКИ.`
+          const allowedTools = getRoleToolset(m.role, { depth: depth + 1 })
+          const subCtx: ToolContext = {
+            ...ctx, signal: taskAc.signal,
+            subProviderId: baseProviderId as ProviderId, subModel: descriptor.defaultModel,
+            delegationDepth: depth + 1, parentCallId: subCallId
+          }
+          const res = await runSubAgentLoop({
+            provider, messages: [
+              { role: 'system', content: systemContent },
+              { role: 'user', content: goal }
+            ], allowedToolNames: allowedTools, ctx: subCtx, signal: taskAc.signal, role: m.role,
+            onToolActivity: () => { toolCount++; emitSubagent('running') }
+          })
+          if (ctx.subCostGuard) {
+            const spent = ctx.subCostGuard.current() - batchStartCents
+            if (spent >= batchCapCents && !batchCapped) { batchCapped = true; subAgentQueue.cancel({ group: groupTag }) }
+          }
+          if (res.exitReason === 'error') { finalizeSub('error', res.text.trim() || undefined); throw new Error(res.error ?? 'swarm member error') }
+          const trimmed = res.text.trim()
+          if (!trimmed) { finalizeSub('error'); throw new Error('участник роя вернул пустой ответ') }
+          emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
+          finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
+          return { id: m.id, role: m.role, angle: m.angle, result: trimmed }
+        } catch (taskErr) {
+          emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
+          finalizeSub('error')
+          throw taskErr
+        } finally {
+          clearTimeout(timeoutId); ctx.signal.removeEventListener('abort', parentAbortHandler); queueSlot?.release()
+        }
+      }
+
+      // 1) Запускаем рой параллельно (через общий семафор/очередь).
+      const settled = await Promise.allSettled(roster.map(runMember))
+      const variants = settled
+        .map((r, i) => r.status === 'fulfilled'
+          ? { id: roster[i].id, role: roster[i].role, angle: roster[i].angle, result: r.value.result }
+          : null)
+        .filter((v): v is { id: string; role: string; angle: string; result: string } => v !== null)
+
+      if (variants.length === 0) {
+        const errs = settled.map((r, i) => r.status === 'rejected' ? `${roster[i].id}: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}` : '').filter(Boolean)
+        return { id: call.id, name: call.name, result: '', error: `swarm: ни один агент роя не дал результат. ${errs.join('; ')}` }
+      }
+
+      // 2) АРБИТР: отдельный агент собирает варианты, оценивает и синтезирует
+      // консенсус. Read-only (роль critic) — он не правит код, только выбирает/
+      // синтезирует. Если арбитр упал — фоллбэк: вернуть все варианты главному.
+      const variantsBlock = variants
+        .map((v, i) => `### Вариант ${i + 1} — ${v.role}/${v.id} (угол: ${v.angle})\n${v.result}`)
+        .join('\n\n')
+      const arbiterSystem = 'Ты — АРБИТР роя агентов. Тебе дают несколько независимых вариантов решения ОДНОЙ цели. Твоя задача: оценить их, выбрать лучший ИЛИ синтезировать консенсус из сильных сторон нескольких. Верни: 1) КОНСЕНСУС — итоговое лучшее решение цели (готовое к использованию); 2) ОБОСНОВАНИЕ — на каких вариантах оно основано и почему (1-3 строки). Будь решительным: один чёткий результат, а не пересказ всех.'
+      const arbiterUser = `Цель: ${goal}\n\nВарианты роя (${variants.length}):\n\n${variantsBlock}\n\nВыбери/синтезируй лучший консенсусный результат.`
+
+      let consensus = ''
+      let arbiterOk = false
+      const arbiterCallId = `${call.id}:arbiter`
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'subagent-run', callId: arbiterCallId, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: `консенсус из ${variants.length} вариантов`, status: 'running' }
+      })
+      let arbiterSessionId: number | null = null
+      if (ctx.subSessions) {
+        try {
+          arbiterSessionId = ctx.subSessions.create({
+            projectPath: ctx.projectPath, parentChatId: ctx.parentChatId ?? null,
+            role: 'arbiter', task: `[swarm-arbiter] ${goal}`, group: groupTag, callId: arbiterCallId,
+            providerId: baseProviderId, model: descriptor.defaultModel,
+            depth: depth + 1, parentCallId: ctx.parentCallId ?? call.id
+          })
+          ctx.subSessions.appendMessage(arbiterSessionId, ctx.projectPath, 'user', arbiterUser)
+        } catch { /* persist не критично */ }
+      }
+      try {
+        const arbiterProvider = createProvider(baseProviderId as keyof typeof PROVIDERS, {
+          apiKey, model: descriptor.defaultModel, cwd: ctx.projectPath, signal: ctx.signal
+        })
+        // Арбитр — read-only (никаких правок при синтезе).
+        const res = await runSubAgentLoop({
+          provider: arbiterProvider,
+          messages: [{ role: 'system', content: arbiterSystem }, { role: 'user', content: arbiterUser }],
+          allowedToolNames: getRoleToolset('critic', { depth: depth + 1 }),
+          ctx: { ...ctx, subProviderId: baseProviderId as ProviderId, subModel: descriptor.defaultModel, delegationDepth: depth + 1, parentCallId: arbiterCallId },
+          signal: ctx.signal, role: 'critic'
+        })
+        consensus = res.text.trim()
+        arbiterOk = res.exitReason !== 'error' && consensus.length > 0
+        ctx.sender.send('ai:event', {
+          id: ctx.sendId,
+          event: { type: 'subagent-run', callId: arbiterCallId, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: `консенсус из ${variants.length} вариантов`, status: arbiterOk ? 'done' : 'error', result: consensus.slice(0, 1200) } })
+        if (arbiterSessionId != null && ctx.subSessions) {
+          try {
+            if (consensus) ctx.subSessions.appendMessage(arbiterSessionId, ctx.projectPath, 'assistant', consensus)
+            ctx.subSessions.update(arbiterSessionId, { status: arbiterOk ? 'done' : 'error', endedAt: Date.now() })
+          } catch { /* persist не критично */ }
+        }
+      } catch (arbErr) {
+        ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'subagent-run', callId: arbiterCallId, label: '⚖️ arbiter', provider: baseProviderId, role: 'critic', swarm: groupTag, toolCount: 0, task: 'консенсус', status: 'error', result: arbErr instanceof Error ? arbErr.message : String(arbErr) } })
+        if (arbiterSessionId != null && ctx.subSessions) {
+          try { ctx.subSessions.update(arbiterSessionId, { status: 'error', endedAt: Date.now() }) } catch { /* */ }
+        }
+      }
+
+      try {
+        ctx.recordJournal(ctx.projectPath, 'note',
+          `🐝 swarm — ${variants.length}/${roster.length} вариантов${arbiterOk ? ' + консенсус арбитра' : ' (арбитр не дал ответ)'}${batchCapped ? ' (стоп по cost-cap)' : ''}`,
+          `Цель: ${goal.slice(0, 200)}`)
+      } catch { /* journal не критично */ }
+
+      const capNote = batchCapped ? `\n\n⚠️ Рой остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)}.` : ''
+      if (arbiterOk) {
+        return { id: call.id, name: call.name, result: `🐝 Рой из ${variants.length} агентов → консенсус арбитра:\n\n${consensus}${capNote}` }
+      }
+      // Фоллбэк: арбитр не справился — отдаём главному все варианты, пусть решит сам.
+      return { id: call.id, name: call.name, result: `🐝 Рой дал ${variants.length} вариантов (арбитр не синтезировал консенсус — выбери лучший сам):\n\n${variantsBlock}${capNote}` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
@@ -2238,6 +2559,8 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'delegate_task': delegateTaskHandler,
   'delegate_parallel': delegateParallelHandler,
   'orchestrate': orchestrateHandler,
+  // Agent Swarms (Фаза 4, Идея 10) — рой агентов с консенсусом-арбитром
+  'swarm': swarmHandler,
   'memory_save': memorySaveHandler,
   'memory_search': memorySearchHandler,
   // Core Memory (Hermes-style) — sequential, file-backed, no user confirmation

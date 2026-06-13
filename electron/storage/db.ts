@@ -369,6 +369,19 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
         CREATE INDEX IF NOT EXISTS idx_session_todos_project ON session_todos(project_path, session_id, ord);
       `)
     }
+  },
+  {
+    version: 14,
+    description: 'Дерево делегирования (Фаза 4, Идея 3): sub_depth + sub_parent_call_id для иерархии main → суб → под-суб + пометка swarm-роя.',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(chat_sessions)').all() as Array<{ name: string }>).map(c => c.name)
+      // sub_depth — глубина узла в дереве (главный=0, его суб=1, …). NULL у
+      // старых субов → визуализация трактует как 0/корень.
+      if (!cols.includes('sub_depth')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_depth INTEGER')
+      // sub_parent_call_id — callId агента-родителя. Связывает под-субов с их
+      // субом-родителем для дерева в панели Agents (sub_call_id ← sub_parent_call_id).
+      if (!cols.includes('sub_parent_call_id')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_parent_call_id TEXT')
+    }
   }
 ]
 

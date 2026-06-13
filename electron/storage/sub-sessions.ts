@@ -28,6 +28,8 @@ export interface SubSessionRow {
   callId: string | null          // callId эфемерной карточки subagent-run
   providerId: string | null
   model: string | null
+  depth: number | null           // глубина в дереве делегирования (Фаза 4)
+  parentCallId: string | null    // callId агента-родителя в дереве (Фаза 4)
   startedAt: number | null
   endedAt: number | null
   createdAt: number
@@ -46,6 +48,8 @@ interface RawRow {
   callId: string | null
   providerId: string | null
   model: string | null
+  depth: number | null
+  parentCallId: string | null
   startedAt: number | null
   endedAt: number | null
   createdAt: number
@@ -56,6 +60,7 @@ const SELECT = `
          sub_role as role, sub_status as status, sub_task as task,
          sub_group as "group", sub_tool_count as toolCount, sub_cost_cents as costCents,
          sub_call_id as callId, provider_id as providerId, model,
+         sub_depth as depth, sub_parent_call_id as parentCallId,
          sub_started_at as startedAt, sub_ended_at as endedAt, created_at as createdAt
   FROM chat_sessions
 `
@@ -71,6 +76,8 @@ export interface SubSessions {
     callId?: string | null
     providerId?: string | null
     model?: string | null
+    depth?: number | null
+    parentCallId?: string | null
   }) => number
   /** Обновить статус / счётчики суб-сессии. */
   update: (id: number, patch: {
@@ -92,8 +99,8 @@ export function createSubSessions(db: Database): SubSessions {
         `INSERT INTO chat_sessions
           (project_path, title, provider_id, model, created_at, last_message_at,
            kind, parent_chat_id, sub_role, sub_status, sub_task, sub_group,
-           sub_tool_count, sub_call_id, sub_started_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'subagent', ?, ?, 'running', ?, ?, 0, ?, ?)`
+           sub_tool_count, sub_call_id, sub_depth, sub_parent_call_id, sub_started_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'subagent', ?, ?, 'running', ?, ?, 0, ?, ?, ?, ?)`
       ).run(
         opts.projectPath,
         opts.role ? `🤖 ${opts.role}` : '🤖 sub-agent',
@@ -105,6 +112,8 @@ export function createSubSessions(db: Database): SubSessions {
         opts.task ?? null,
         opts.group ?? null,
         opts.callId ?? null,
+        opts.depth ?? null,
+        opts.parentCallId ?? null,
         now
       )
       return Number(info.lastInsertRowid)

@@ -10,6 +10,8 @@
  * случайно даст read-only роли write-tool, тест упадёт.
  */
 
+import { MAX_DELEGATION_DEPTH } from './delegation-limits'
+
 /** Базовый read-only набор — доступен всем ролям. */
 const READ_ONLY_TOOLS = [
   'read_file',
@@ -29,17 +31,25 @@ const READ_ONLY_TOOLS = [
 const TODO_WORKER_TOOLS = ['todo_update', 'todo_list'] as const
 
 /**
- * Инструменты, которые субагенту НИКОГДА нельзя давать — независимо от роли.
- * delegate_* / orchestrate = рекурсивное делегирование (Фаза 4), запрещено как
- * защита от бесконечной рекурсии и взрыва стоимости. orchestrate вызывает только
- * ГЛАВНЫЙ агент. Остальное — тяжёлые/побочные операции, не относящиеся к узкой
- * подзадаче субагента.
+ * Инструменты, которые субагенту НИКОГДА нельзя давать — независимо от роли
+ * и глубины. orchestrate / swarm — оркестрация верхнего уровня: декомпозиция
+ * большой цели и рой агентов с арбитром. Их вызывает ТОЛЬКО главный агент
+ * (depth 0); субам они недоступны всегда — иначе дерево/рой множились бы
+ * неконтролируемо.
+ *
+ * ВНИМАНИЕ: delegate_task / delegate_parallel здесь БОЛЬШЕ НЕТ. В Фазе 4 они
+ * стали условно-разрешёнными субам — под лимитом глубины (MAX_DELEGATION_DEPTH)
+ * и общего числа агентов. Гейт делегирования вынесен в delegation-limits.ts и
+ * применяется в getRoleToolset(role, { depth }) + повторно в самих handler'ах
+ * (defence-in-depth). До Фазы 4 они были в этом множестве (см. role-tools.test).
  */
 export const SUBAGENT_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
-  'delegate_task',
-  'delegate_parallel',
-  'orchestrate'
+  'orchestrate',
+  'swarm'
 ])
+
+/** delegate_* — условно-разрешённые субам инструменты (под лимитом глубины). */
+const DELEGATION_TOOLS = ['delegate_task', 'delegate_parallel'] as const
 
 /**
  * Вернуть список разрешённых tool-имён для роли субагента.
@@ -51,9 +61,17 @@ export const SUBAGENT_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
  *   run_command (через command-policy denylist, как у главного агента).
  * - роль не задана (delegate_task без роли) → безопасный read-only default.
  *
- * delegate_task / delegate_parallel исключаются ВСЕГДА (SUBAGENT_FORBIDDEN_TOOLS).
+ * Фаза 4 (Идея 3): delegate_task / delegate_parallel добавляются субу-исполнителю
+ * (executor / researcher / planner) ТОЛЬКО если его глубина позволяет делегировать
+ * дальше (depth < MAX_DELEGATION_DEPTH). На предельной глубине — не добавляются
+ * (суб «листовой»). orchestrate / swarm субам недоступны всегда. Лимит общего числа
+ * агентов проверяется отдельно — в самих handler'ах через SessionAgentCounter.
+ *
+ * @param opts.depth — глубина субагента (главный=0, его суб=1, …). По умолчанию 1
+ *   (любой суб глубже корня), чтобы без явного depth поведение совпадало с прежним
+ *   (делегирование на 1+ зависит от MAX_DELEGATION_DEPTH).
  */
-export function getRoleToolset(role?: string | null): string[] {
+export function getRoleToolset(role?: string | null, opts?: { depth?: number }): string[] {
   let tools: string[]
   switch (role) {
     case 'executor':
@@ -78,6 +96,15 @@ export function getRoleToolset(role?: string | null): string[] {
       tools = [...READ_ONLY_TOOLS, 'todo_list']
       break
   }
-  // Defence-in-depth: даже если выше кто-то добавит delegate_* — вырезаем.
+  // Фаза 4: на разрешённой глубине дать суб-исполнителю право делегировать
+  // дальше. Роли researcher/planner/executor — те, кто реально декомпозирует
+  // и распараллеливает работу. critic/verifier остаются «листовыми» (их дело —
+  // оценка/проверка, не порождение поддерева).
+  const depth = opts?.depth ?? 1
+  const canDelegateRole = role === 'executor' || role === 'researcher' || role === 'planner'
+  if (canDelegateRole && depth < MAX_DELEGATION_DEPTH) {
+    tools = [...tools, ...DELEGATION_TOOLS]
+  }
+  // Defence-in-depth: orchestrate / swarm вырезаем всегда (только главный агент).
   return tools.filter(t => !SUBAGENT_FORBIDDEN_TOOLS.has(t))
 }

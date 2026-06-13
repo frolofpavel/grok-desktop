@@ -421,6 +421,10 @@ export interface SubSession {
   callId: string | null
   providerId: string | null
   model: string | null
+  /** Глубина в дереве делегирования (Фаза 4): главный=0, его суб=1, под-суб=2. */
+  depth: number | null
+  /** callId агента-родителя в дереве (Фаза 4) — для иерархии в панели Agents. */
+  parentCallId: string | null
   startedAt: number | null
   endedAt: number | null
   createdAt: number
