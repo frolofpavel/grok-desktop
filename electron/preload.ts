@@ -227,7 +227,9 @@ contextBridge.exposeInMainWorld('api', {
     history: (subSessionId: number) => ipcRenderer.invoke('agents:history', subSessionId),
     cancel: (filter: { all?: boolean; group?: string | null; role?: string | null }) =>
       ipcRenderer.invoke('agents:cancel', filter),
-    queueStats: () => ipcRenderer.invoke('agents:queue-stats')
+    queueStats: () => ipcRenderer.invoke('agents:queue-stats'),
+    todos: (projectPath: string, sessionId?: number | null) =>
+      ipcRenderer.invoke('agents:todos', projectPath, sessionId)
   },
   suggestions: {
     get: (projectPath: string) => ipcRenderer.invoke('suggestions:get', projectPath)

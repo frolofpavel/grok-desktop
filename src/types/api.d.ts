@@ -283,6 +283,7 @@ declare global {
         history(subSessionId: number): Promise<StoredChatMessage[]>
         cancel(filter: { all?: boolean; group?: string | null; role?: string | null }): Promise<number>
         queueStats(): Promise<{ inFlight: number; queued: number; tracked: number }>
+        todos(projectPath: string, sessionId?: number | null): Promise<SessionTodo[]>
       }
       suggestions: {
         get(projectPath: string): Promise<Suggestion[]>
@@ -423,6 +424,20 @@ export interface SubSession {
   startedAt: number | null
   endedAt: number | null
   createdAt: number
+}
+
+/** Пункт оркестрационного todo-листа TodoGate (Фаза 3). */
+export interface SessionTodo {
+  id: number
+  projectPath: string
+  sessionId: number | null
+  goal: string | null
+  title: string
+  status: 'pending' | 'in_progress' | 'done' | 'blocked'
+  assigneeCallId: string | null
+  ord: number
+  createdAt: number
+  updatedAt: number
 }
 
 /** Дескриптор провайдера — единый источник из main process (electron/ai/registry.ts). */

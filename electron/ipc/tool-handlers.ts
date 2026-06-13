@@ -117,6 +117,14 @@ export interface ToolContext {
   subModel?: string
   /** ID главного чата — родитель для персистентных суб-сессий (Фаза 2). */
   parentChatId?: number | null
+  /** Фасад TodoGate (Фаза 3, Идея 2) — оркестрационный todo-лист сессии.
+   *  Опционально: без него todo_* tools вернут понятную ошибку. */
+  sessionTodos?: {
+    createBatch: (opts: { projectPath: string; sessionId: number | null; goal?: string | null; titles: string[] }) => Array<{ id: number; title: string; status: string; ord: number }>
+    update: (id: number, patch: { status?: string; assigneeCallId?: string | null }) => void
+    list: (projectPath: string, sessionId?: number | null) => Array<{ id: number; title: string; status: string; assigneeCallId: string | null; ord: number }>
+    findByTitle: (projectPath: string, sessionId: number | null, title: string) => { id: number; title: string; status: string } | null
+  }
   /** Фасад персистентных суб-сессий (Фаза 2, Идея 1). Опционально — без него
    *  субагенты работают как прежде (только эфемерная карточка). */
   subSessions?: {
@@ -926,8 +934,12 @@ const delegateParallelHandler: ToolHandler = {
             signal: taskAc.signal
           })
           const rolePrompt = task.role ? getRolePrompt(task.role) : null
-          const systemContent = rolePrompt
+          // Идея 8 (handoff): просим суб дать СТРУКТУРИРОВАННЫЙ итог, чтобы при
+          // 20+ параллельных субах главный агент получал сжатые выводы, а не
+          // простыни. researcher/verifier также сохраняют находки через memory_save.
+          const baseContent = rolePrompt
             ?? 'Ты — sub-agent с доступом к инструментам (чтение файлов, поиск по проекту). Выполни узкую задачу, при необходимости используй tools, ответь по существу.'
+          const systemContent = `${baseContent}\n\nВ финале дай краткий структурированный итог: СДЕЛАЛ / НАШЁЛ / РЕКОМЕНДУЮ (по одной-две строки). Ключевые находки сохраняй через memory_save (если доступен).`
           const messages = [
             { role: 'system' as const, content: systemContent },
             { role: 'user' as const, content: task.prompt }
@@ -994,6 +1006,263 @@ const delegateParallelHandler: ToolHandler = {
         ? `\n\n---\n\n⚠️ Батч остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)} на один delegate_parallel. Оставшиеся задачи не выполнены.`
         : ''
       return { id: call.id, name: call.name, result: output + capNote }
+    } catch (err) {
+      return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+}
+
+// ============================================================================
+// orchestrate — Smart Orchestrator + авто-декомпозиция (Фаза 3, Идея 5)
+// ============================================================================
+
+export interface DecomposedSubtask { id: string; prompt: string; role: string }
+
+/**
+ * Чистый парсер ответа планировщика → список подзадач. Устойчив: берёт первый
+ * '[' … последний ']', валидирует роли, режет до maxSubtasks. Если распарсить не
+ * удалось — фоллбэк: одна executor-подзадача = вся цель. Экспортируется для тестов.
+ */
+export function parseDecomposition(text: string, goal: string, maxSubtasks: number): DecomposedSubtask[] {
+  const start = text.indexOf('[')
+  const end = text.lastIndexOf(']')
+  let parsed: unknown = null
+  if (start >= 0 && end > start) {
+    try { parsed = JSON.parse(text.slice(start, end + 1)) } catch { /* фоллбэк ниже */ }
+  }
+  const validRoles = new Set(['researcher', 'executor', 'verifier', 'critic', 'planner'])
+  const tasks: DecomposedSubtask[] = []
+  if (Array.isArray(parsed)) {
+    for (let i = 0; i < parsed.length && tasks.length < maxSubtasks; i++) {
+      const o = parsed[i]
+      if (typeof o !== 'object' || o === null) continue
+      const r = o as Record<string, unknown>
+      const prompt = String(r.prompt ?? '').trim()
+      if (!prompt) continue
+      const role = validRoles.has(String(r.role)) ? String(r.role) : 'executor'
+      const id = String(r.id ?? `task-${i + 1}`).slice(0, 40) || `task-${i + 1}`
+      tasks.push({ id, prompt, role })
+    }
+  }
+  if (tasks.length === 0) {
+    tasks.push({ id: 'task-1', prompt: goal, role: 'executor' })
+  }
+  return tasks
+}
+
+/**
+ * Декомпозиция цели через вызов модели-планировщика. Просим вернуть JSON-массив
+ * подзадач с ролями. Парс — через чистый parseDecomposition (тестируемый).
+ */
+async function decomposeGoal(
+  goal: string,
+  maxSubtasks: number,
+  providerId: string,
+  apiKey: string | null,
+  model: string,
+  projectPath: string,
+  signal: AbortSignal
+): Promise<DecomposedSubtask[]> {
+  const { createProvider, PROVIDERS } = await import('../ai/registry')
+  const descriptor = PROVIDERS[providerId as keyof typeof PROVIDERS]
+  const provider = createProvider(providerId as keyof typeof PROVIDERS, {
+    apiKey, model, cwd: projectPath, signal
+  })
+  const sys = 'Ты — планировщик-декомпозитор. Разбей цель пользователя на независимые подзадачи, каждую с ролью из набора: researcher (анализ/поиск), executor (правка кода), verifier (проверка), critic (ревью), planner (под-план). Верни СТРОГО JSON-массив объектов {"id": "краткий-id", "prompt": "что сделать", "role": "роль"} и ничего больше. Подзадачи должны быть атомарными и параллелизуемыми.'
+  const user = `Цель: ${goal}\n\nМаксимум подзадач: ${maxSubtasks}. Верни только JSON-массив.`
+  let text = ''
+  for await (const event of provider.send([
+    { role: 'system', content: sys },
+    { role: 'user', content: user }
+  ], [])) {
+    if (signal.aborted) break
+    if (event.type === 'text' && typeof event.text === 'string') text += event.text
+    else if (event.type === 'error') throw new Error(event.message)
+    else if (event.type === 'done') break
+  }
+  void descriptor
+  return parseDecomposition(text, goal, maxSubtasks)
+}
+
+const orchestrateHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    try {
+      const goal = String(call.args.goal ?? '').trim()
+      if (!goal) {
+        return { id: call.id, name: call.name, result: '', error: 'orchestrate: goal обязателен' }
+      }
+      const maxSubtasks = Math.max(1, Math.min(12, typeof call.args.max_subtasks === 'number' ? Math.floor(call.args.max_subtasks) : 5))
+      const batchCapCents = typeof call.args.cost_cap_usd === 'number' && call.args.cost_cap_usd > 0
+        ? Math.round(call.args.cost_cap_usd * 100)
+        : DEFAULT_BATCH_COST_CAP_CENTS
+
+      const { createProvider, PROVIDERS } = await import('../ai/registry')
+      const { estimateComplexity, recommendModel } = await import('../ai/smart-router')
+      const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
+      const { getRoleToolset } = await import('../ai/role-tools')
+      const { getRolePrompt } = await import('../ai/agent-roles')
+      const { subAgentQueue } = await import('../ai/sub-queue')
+
+      const baseProviderId = ctx.currentProviderId ?? 'grok'
+      const descriptor = PROVIDERS[baseProviderId as keyof typeof PROVIDERS]
+      if (!descriptor) {
+        return { id: call.id, name: call.name, result: '', error: `orchestrate: неизвестный provider ${baseProviderId}` }
+      }
+      const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
+      if (descriptor.secretKey && !apiKey) {
+        return { id: call.id, name: call.name, result: '', error: `orchestrate: нет API key для ${baseProviderId}` }
+      }
+
+      ctx.sender.send('ai:event', {
+        id: ctx.sendId,
+        event: { type: 'tool-activity', callId: call.id, name: 'orchestrate', label: 'orchestrate', detail: `декомпозиция цели · ${baseProviderId}`, status: 'ok' }
+      })
+
+      // 1) Декомпозиция через модель-планировщик (дешёвая модель достаточна).
+      const plannerModel = recommendModel(baseProviderId, 'moderate') ?? descriptor.defaultModel
+      const subtasks = await decomposeGoal(goal, maxSubtasks, baseProviderId, apiKey, plannerModel, ctx.projectPath, ctx.signal)
+
+      // 2) Создаём todo-лист из подзадач (TodoGate, Идея 2 — связь).
+      if (ctx.sessionTodos) {
+        try {
+          ctx.sessionTodos.createBatch({
+            projectPath: ctx.projectPath, sessionId: ctx.parentChatId ?? null,
+            goal, titles: subtasks.map(t => `[${t.role}] ${t.prompt.slice(0, 120)}`)
+          })
+          ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'todo-updated' } })
+        } catch { /* todo не критично для прогона */ }
+      }
+
+      // Группа батча = callId оркестратора (массовая отмена через панель).
+      const groupTag = call.id
+      const batchStartCents = ctx.subCostGuard?.current() ?? 0
+      let batchCapped = false
+
+      // 3) Параллельный запуск подзадач с умным выбором модели на каждую.
+      const results = await Promise.allSettled(subtasks.map(async (task) => {
+        // Smart-router: оцениваем сложность подзадачи по её промпту → модель.
+        // Простую → дешёвая grok-4-fast, сложную → grok-4 (recommendModel).
+        const complexity = estimateComplexity([{ role: 'user', content: task.prompt }], [])
+        const subModel = recommendModel(baseProviderId, complexity) ?? descriptor.defaultModel
+
+        const subCallId = `${call.id}:${task.id}`
+        let toolCount = 0
+        const emitSubagent = (status: 'running' | 'done' | 'error', result?: string) => {
+          ctx.sender.send('ai:event', {
+            id: ctx.sendId,
+            event: { type: 'subagent-run', callId: subCallId, label: `${task.role} (${complexity})`, provider: baseProviderId, role: task.role, toolCount, task: task.prompt, status, result }
+          })
+        }
+        emitSubagent('running')
+
+        let subSessionId: number | null = null
+        if (ctx.subSessions) {
+          try {
+            subSessionId = ctx.subSessions.create({
+              projectPath: ctx.projectPath, parentChatId: ctx.parentChatId ?? null,
+              role: task.role, task: task.prompt, group: groupTag, callId: subCallId,
+              providerId: baseProviderId, model: subModel
+            })
+            ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', task.prompt)
+          } catch { /* persist не критично */ }
+        }
+        const finalizeSub = (status: string, assistant?: string) => {
+          if (subSessionId == null || !ctx.subSessions) return
+          try {
+            if (assistant) ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'assistant', assistant)
+            ctx.subSessions.update(subSessionId, { status, toolCount, endedAt: Date.now() })
+          } catch { /* persist не критично */ }
+        }
+
+        const taskAc = new AbortController()
+        const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
+        const parentAbortHandler = () => taskAc.abort()
+        ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+
+        let queueSlot: { release: () => void; ticketId: number } | null = null
+        try {
+          queueSlot = await subAgentQueue.enter({ group: groupTag, role: task.role, abort: () => taskAc.abort() }, taskAc.signal)
+        } catch {
+          clearTimeout(timeoutId)
+          ctx.signal.removeEventListener('abort', parentAbortHandler)
+          emitSubagent('error', 'отменён в очереди')
+          finalizeSub('cancelled')
+          throw new Error('отменён в очереди')
+        }
+        if (batchCapped) {
+          clearTimeout(timeoutId)
+          ctx.signal.removeEventListener('abort', parentAbortHandler)
+          queueSlot.release()
+          emitSubagent('error', 'остановлен по cost-cap')
+          finalizeSub('cancelled')
+          throw new Error('остановлен по cost-cap')
+        }
+
+        try {
+          const provider = createProvider(baseProviderId as keyof typeof PROVIDERS, {
+            apiKey, model: subModel, cwd: ctx.projectPath, signal: taskAc.signal
+          })
+          // Идея 8: просим суб выдать СТРУКТУРИРОВАННЫЙ итог (handoff-формат), чтобы
+          // главный агент получал сжатые выводы, а не простыни при 20+ субах.
+          const rolePrompt = getRolePrompt(task.role) ?? 'Ты — sub-agent с доступом к инструментам.'
+          const systemContent = `${rolePrompt}\n\nВ финале дай СТРУКТУРИРОВАННЫЙ итог тремя короткими блоками:\nСДЕЛАЛ: ...\nНАШЁЛ: ...\nРЕКОМЕНДУЮ: ...\nКлючевые находки сохраняй через memory_save (если доступен).`
+          const allowedTools = getRoleToolset(task.role)
+          const subCtx: ToolContext = {
+            ...ctx, signal: taskAc.signal,
+            subProviderId: baseProviderId as ProviderId, subModel
+          }
+          const res = await runSubAgentLoop({
+            provider, messages: [
+              { role: 'system', content: systemContent },
+              { role: 'user', content: task.prompt }
+            ], allowedToolNames: allowedTools, ctx: subCtx, signal: taskAc.signal, role: task.role,
+            onToolActivity: () => { toolCount++; emitSubagent('running') }
+          })
+          if (ctx.subCostGuard) {
+            const spent = ctx.subCostGuard.current() - batchStartCents
+            if (spent >= batchCapCents && !batchCapped) {
+              batchCapped = true
+              subAgentQueue.cancel({ group: groupTag })
+            }
+          }
+          if (res.exitReason === 'error') { finalizeSub('error', res.text.trim() || undefined); throw new Error(res.error ?? 'sub-agent error') }
+          const trimmed = res.text.trim()
+          if (!trimmed) { finalizeSub('error'); throw new Error('sub-agent вернул пустой ответ') }
+          emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
+          finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
+          return { id: task.id, role: task.role, model: subModel, result: trimmed }
+        } catch (taskErr) {
+          emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
+          finalizeSub('error')
+          throw taskErr
+        } finally {
+          clearTimeout(timeoutId)
+          ctx.signal.removeEventListener('abort', parentAbortHandler)
+          queueSlot?.release()
+        }
+      }))
+
+      // 4) Сжатый handoff главному агенту: по подзадаче — роль/модель + итог суба.
+      const successCount = results.filter(r => r.status === 'fulfilled').length
+      const blocks = results.map((r, i) => {
+        const t = subtasks[i]
+        if (r.status === 'fulfilled') {
+          return `## ${t.id} — ${r.value.role} (${r.value.model})\n${r.value.result}`
+        }
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+        return `## ${t.id} — ${t.role}\n❌ ${msg}`
+      }).join('\n\n---\n\n')
+
+      try {
+        ctx.recordJournal(ctx.projectPath, 'note',
+          `🧭 orchestrate — ${successCount}/${subtasks.length} подзадач${batchCapped ? ' (стоп по cost-cap)' : ''}`,
+          `Цель: ${goal.slice(0, 200)}\nРоли: ${subtasks.map(t => t.role).join(', ')}`)
+      } catch { /* journal не критично */ }
+
+      const capNote = batchCapped ? `\n\n---\n\n⚠️ Оркестратор остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)}.` : ''
+      const header = `🧭 Оркестратор разбил цель на ${subtasks.length} подзадач (${successCount} успешно). Сводка выводов:\n\n`
+      return { id: call.id, name: call.name, result: header + blocks + capNote }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }
@@ -1117,6 +1386,113 @@ const createPlanHandler: ToolHandler = {
       return { id: call.id, name: call.name, result: `Plan #${plan.id} created with ${steps.length} steps. User will execute/confirm in the Plan view.` }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+}
+
+// ============================================================================
+// TodoGate — todo_create / todo_update / todo_list (Фаза 3, Идея 2)
+// ============================================================================
+
+// Общий формат todo-листа для tool-результата (компактно, без шума).
+function formatTodoList(todos: Array<{ id: number; title: string; status: string; assigneeCallId?: string | null }>): string {
+  if (todos.length === 0) return 'Todo-лист пуст.'
+  const icon: Record<string, string> = { pending: '☐', in_progress: '⏳', done: '✅', blocked: '⛔' }
+  const lines = todos.map(t => `${icon[t.status] ?? '☐'} #${t.id} ${t.title}${t.assigneeCallId ? ` (assignee: ${t.assigneeCallId})` : ''}`)
+  const done = todos.filter(t => t.status === 'done').length
+  return `Прогресс: ${done}/${todos.length}\n${lines.join('\n')}`
+}
+
+// Эфемерное событие для live-обновления секции Todo в панели Agents.
+function emitTodoUpdate(ctx: ToolContext): void {
+  ctx.sender.send('ai:event', { id: ctx.sendId, event: { type: 'todo-updated' } })
+}
+
+const todoCreateHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    if (!ctx.sessionTodos) {
+      return { id: call.id, name: call.name, result: '', error: 'todo_create: TodoGate недоступен в этом контексте' }
+    }
+    const rawItems = Array.isArray(call.args.items) ? call.args.items : []
+    const titles = rawItems.map(String).map(s => s.trim()).filter(Boolean)
+    if (titles.length === 0) {
+      return { id: call.id, name: call.name, result: '', error: 'todo_create: items обязателен (непустой массив строк)' }
+    }
+    const goal = call.args.goal ? String(call.args.goal) : null
+    try {
+      const created = ctx.sessionTodos.createBatch({
+        projectPath: ctx.projectPath,
+        sessionId: ctx.parentChatId ?? null,
+        goal, titles
+      })
+      emitTodoUpdate(ctx)
+      emitActivity(ctx, call, 'ok', 'todo_create', `${created.length} пунктов${goal ? ` · ${goal.slice(0, 40)}` : ''}`)
+      return { id: call.id, name: call.name, result: `Создан todo-лист (${created.length} пунктов):\n${formatTodoList(created)}` }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
+    }
+  }
+}
+
+const todoUpdateHandler: ToolHandler = {
+  mode: 'sequential',
+  async handle(call, ctx) {
+    if (!ctx.sessionTodos) {
+      return { id: call.id, name: call.name, result: '', error: 'todo_update: TodoGate недоступен в этом контексте' }
+    }
+    const sessionId = ctx.parentChatId ?? null
+    // Идентификация пункта: по числовому id ИЛИ по точному title (субу удобнее
+    // по названию — он не всегда знает id).
+    let todoId: number | null = null
+    if (typeof call.args.id === 'number') {
+      todoId = Math.floor(call.args.id)
+    } else if (call.args.title) {
+      const found = ctx.sessionTodos.findByTitle(ctx.projectPath, sessionId, String(call.args.title))
+      todoId = found?.id ?? null
+    }
+    if (todoId == null) {
+      return { id: call.id, name: call.name, result: '', error: 'todo_update: укажи id (число) или title (точное название существующего пункта)' }
+    }
+    const status = call.args.status ? String(call.args.status) : undefined
+    const allowed = ['pending', 'in_progress', 'done', 'blocked']
+    if (status !== undefined && !allowed.includes(status)) {
+      return { id: call.id, name: call.name, result: '', error: `todo_update: status должен быть одним из ${allowed.join('/')}` }
+    }
+    // assignee_call_id опционален — кто взял пункт (callId суба).
+    const assigneeCallId = call.args.assignee_call_id !== undefined
+      ? (call.args.assignee_call_id ? String(call.args.assignee_call_id) : null)
+      : undefined
+    try {
+      ctx.sessionTodos.update(todoId, { status, assigneeCallId })
+      emitTodoUpdate(ctx)
+      const list = ctx.sessionTodos.list(ctx.projectPath, sessionId)
+      emitActivity(ctx, call, 'ok', 'todo_update', `#${todoId}${status ? ` → ${status}` : ''}`)
+      return { id: call.id, name: call.name, result: `Обновлён пункт #${todoId}.\n${formatTodoList(list)}` }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
+    }
+  }
+}
+
+const todoListHandler: ToolHandler = {
+  mode: 'parallel-read',
+  async handle(call, ctx) {
+    if (!ctx.sessionTodos) {
+      return { id: call.id, name: call.name, result: '', error: 'todo_list: TodoGate недоступен в этом контексте' }
+    }
+    try {
+      const list = ctx.sessionTodos.list(ctx.projectPath, ctx.parentChatId ?? null)
+      emitActivity(ctx, call, 'ok', 'todo_list', `${list.length} пунктов`)
+      return { id: call.id, name: call.name, result: formatTodoList(list) }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      emitActivity(ctx, call, 'error', call.name, msg)
+      return { id: call.id, name: call.name, result: '', error: msg }
     }
   }
 }
@@ -1850,6 +2226,10 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'list_connectors': listConnectorsHandler,
   'connector_query': connectorQueryHandler,
   'create_plan': createPlanHandler,
+  // TodoGate (Фаза 3) — оркестрационный todo-лист сессии
+  'todo_create': todoCreateHandler,
+  'todo_update': todoUpdateHandler,
+  'todo_list': todoListHandler,
   'preflight': preflightHandler,
   'read_journal': readJournalHandler,
   'generate_html': generateHtmlHandler,
@@ -1857,6 +2237,7 @@ const HANDLER_REGISTRY: Record<string, ToolHandler> = {
   'render_chart': renderChartHandler,
   'delegate_task': delegateTaskHandler,
   'delegate_parallel': delegateParallelHandler,
+  'orchestrate': orchestrateHandler,
   'memory_save': memorySaveHandler,
   'memory_search': memorySearchHandler,
   // Core Memory (Hermes-style) — sequential, file-backed, no user confirmation

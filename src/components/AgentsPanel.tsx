@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useProject } from '../store/projectStore'
-import type { SubSession, StoredChatMessage } from '../types/api'
+import type { SubSession, SessionTodo, StoredChatMessage } from '../types/api'
 import { Markdown } from './Markdown'
 
 /**
@@ -93,6 +93,7 @@ export function AgentsPanel() {
   const path = useProject(s => s.path)
   const setActiveView = useProject(s => s.setActiveView)
   const [subs, setSubs] = useState<SubSession[]>([])
+  const [todos, setTodos] = useState<SessionTodo[]>([])
   const [queue, setQueue] = useState<{ inFlight: number; queued: number; tracked: number } | null>(null)
   const [viewing, setViewing] = useState<SubSession | null>(null)
   const [roleFilter, setRoleFilter] = useState<string>('')
@@ -102,12 +103,14 @@ export function AgentsPanel() {
   const refresh = useCallback(async () => {
     if (!path) return
     try {
-      const [list, stats] = await Promise.all([
+      const [list, stats, todoList] = await Promise.all([
         window.api.agents.list(path),
-        window.api.agents.queueStats()
+        window.api.agents.queueStats(),
+        window.api.agents.todos(path)
       ])
       setSubs(list)
       setQueue(stats)
+      setTodos(todoList)
     } catch { /* IPC может быть недоступен в dev — панель просто пустая */ }
   }, [path])
 
@@ -187,6 +190,24 @@ export function AgentsPanel() {
       </div>
 
       <div className="gg-panel-body">
+        {todos.length > 0 && (
+          <div className="gg-todogate">
+            <div className="gg-todogate-head">
+              <span className="gg-todogate-title">TodoGate</span>
+              <span className="gg-todogate-progress">{todos.filter(t => t.status === 'done').length}/{todos.length} готово</span>
+            </div>
+            <div className="gg-todogate-list">
+              {todos.map(t => (
+                <div key={t.id} className={`gg-todo-item is-${t.status}`} title={t.goal ?? ''}>
+                  <span className="gg-todo-icon">
+                    {t.status === 'done' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'blocked' ? '⛔' : '☐'}
+                  </span>
+                  <span className="gg-todo-title">{t.title}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {filtered.length === 0 && (
           <div className="gg-panel-empty">
             Пока нет суб-агентов. Когда главный агент делегирует задачи (delegate_task / delegate_parallel), они появятся здесь.

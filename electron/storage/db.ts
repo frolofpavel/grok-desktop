@@ -345,6 +345,30 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       if (!cols.includes('sub_ended_at')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_ended_at INTEGER')
       db.exec("CREATE INDEX IF NOT EXISTS idx_chat_sessions_subagent ON chat_sessions(parent_chat_id, kind) WHERE kind = 'subagent'")
     }
+  },
+  {
+    version: 13,
+    description: 'TodoGate (Фаза 3): session_todos — оркестрационный todo-лист в рамках сессии/цели. Главный агент создаёт, субы берут/закрывают.',
+    run: (db: DB) => {
+      // Отдельная лёгкая таблица, НЕ переиспользуем tasks: tasks — плоские
+      // persistent проектные задачи (id/text/done), а session_todos — эфемерный
+      // оркестрационный лист одного прогона/цели с status-enum, assignee и order.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_todos (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_path TEXT NOT NULL,
+          session_id INTEGER,
+          goal TEXT,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','in_progress','done','blocked')),
+          assignee_call_id TEXT,
+          ord INTEGER NOT NULL DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_todos_project ON session_todos(project_path, session_id, ord);
+      `)
+    }
   }
 ]
 

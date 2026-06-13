@@ -81,6 +81,41 @@ describe('getRoleToolset — whitelist по роли', () => {
       expect(SUBAGENT_FORBIDDEN_TOOLS.has('delegate_task')).toBe(true)
       expect(SUBAGENT_FORBIDDEN_TOOLS.has('delegate_parallel')).toBe(true)
     })
+    it('orchestrate тоже запрещён субам (Фаза 3 — вызывает только главный агент)', () => {
+      expect(SUBAGENT_FORBIDDEN_TOOLS.has('orchestrate')).toBe(true)
+      for (const role of ['researcher', 'critic', 'planner', 'verifier', 'executor', null]) {
+        expect(getRoleToolset(role)).not.toContain('orchestrate')
+      }
+    })
+  })
+
+  describe('TodoGate доступ по ролям (Фаза 3, Идея 2)', () => {
+    it('planner может создавать todo-лист (todo_create)', () => {
+      expect(getRoleToolset('planner')).toContain('todo_create')
+    })
+    it('executor/researcher/verifier берут/закрывают пункты (todo_update/todo_list)', () => {
+      for (const role of ['executor', 'researcher', 'verifier']) {
+        expect(getRoleToolset(role)).toContain('todo_update')
+        expect(getRoleToolset(role)).toContain('todo_list')
+      }
+    })
+    it('todo_create НЕ у субов-исполнителей (лист создаёт planner/главный агент)', () => {
+      for (const role of ['executor', 'researcher', 'verifier', 'critic', null]) {
+        expect(getRoleToolset(role)).not.toContain('todo_create')
+      }
+    })
+  })
+
+  describe('per-sub memory (Фаза 3, Идея 8)', () => {
+    it('researcher / verifier / executor сохраняют находки через memory_save', () => {
+      for (const role of ['researcher', 'verifier', 'executor']) {
+        expect(getRoleToolset(role)).toContain('memory_save')
+      }
+    })
+    it('critic / неизвестная роль не получают memory_save', () => {
+      expect(getRoleToolset('critic')).not.toContain('memory_save')
+      expect(getRoleToolset(null)).not.toContain('memory_save')
+    })
   })
 })
 

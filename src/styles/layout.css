@@ -6067,3 +6067,39 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   background: var(--bg-secondary);
   border-radius: var(--radius-sm);
 }
+
+/* === TodoGate (Фаза 3) — оркестрационный todo-лист в панели Agents === */
+.gg-todogate {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.gg-todogate-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.gg-todogate-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.gg-todogate-progress { font-size: 11px; color: var(--text-tertiary); }
+.gg-todogate-list { display: flex; flex-direction: column; gap: 4px; }
+.gg-todo-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+.gg-todo-icon { flex-shrink: 0; }
+.gg-todo-item.is-done .gg-todo-title { color: var(--text-tertiary); text-decoration: line-through; }
+.gg-todo-item.is-blocked .gg-todo-title { color: var(--error); }
+.gg-todo-item.is-in_progress .gg-todo-title { color: var(--accent); }

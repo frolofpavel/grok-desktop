@@ -338,6 +338,50 @@ export const TOOL_DEFS: ToolDefinition[] = [
     }
   },
   {
+    name: 'todo_create',
+    description: 'TodoGate: создать оркестрационный todo-лист разом (batch). Главный агент декомпозирует цель в список пунктов — суб-агенты потом берут (todo_update status=in_progress), закрывают (done) или блокируют (blocked). Лист виден пользователю в панели Агенты как живой прогресс. Используй в начале сложной многошаговой задачи перед делегированием.',
+    parameters: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { type: 'string' }, description: 'Список названий пунктов (по одному действию на пункт).' },
+        goal: { type: 'string', description: 'Опционально — общая цель листа (для группировки/контекста).' }
+      },
+      required: ['items']
+    }
+  },
+  {
+    name: 'todo_update',
+    description: 'TodoGate: обновить статус пункта todo-листа. Суб-агент помечает пункт in_progress когда берёт его, done когда закрыл, blocked если застрял. Пункт идентифицируется по id (число) ИЛИ title (точное название).',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'number', description: 'ID пункта (из todo_create / todo_list).' },
+        title: { type: 'string', description: 'Точное название пункта (альтернатива id).' },
+        status: { type: 'string', enum: ['pending', 'in_progress', 'done', 'blocked'], description: 'Новый статус.' },
+        assignee_call_id: { type: 'string', description: 'Опционально — кто взял пункт (идентификатор суба).' }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'todo_list',
+    description: 'TodoGate: показать текущее состояние todo-листа сессии (прогресс + статусы пунктов). Read-only.',
+    parameters: { type: 'object', properties: {} }
+  },
+  {
+    name: 'orchestrate',
+    description: 'Smart-оркестратор (главный агент): принимает большую цель → САМ декомпозирует её на подзадачи с ролями через вызов планировщика → создаёт todo-лист → запускает все подзадачи параллельно (sub-queue, семафор, cost-cap). Модель КАЖДОЙ подзадачи выбирается умно (smart-router: простая → дешёвая grok-4-fast, сложная → grok-4). Используй для крупной задачи которую стоит распараллелить между ролями (researcher/executor/verifier/...). НЕ вызывается суб-агентами — только главный агент.',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'Большая цель в свободной форме — оркестратор сам разобьёт её на подзадачи с ролями.' },
+        max_subtasks: { type: 'number', description: 'Опционально — максимум подзадач в декомпозиции (по умолчанию 5, потолок 12).' },
+        cost_cap_usd: { type: 'number', description: 'Опционально — лимит $ на весь прогон оркестратора (по умолчанию $3).' }
+      },
+      required: ['goal']
+    }
+  },
+  {
     name: 'impact_analysis',
     description: 'Показывает какие файлы зависят от указанного файла или символа. Используй перед рефакторингом чтобы понять масштаб изменений.',
     parameters: {

@@ -21,14 +21,24 @@ const READ_ONLY_TOOLS = [
 ] as const
 
 /**
+ * TodoGate (Фаза 3, Идея 2): доступ к оркестрационному todo-листу.
+ * todo_update/todo_list даём всем ролям-исполнителям — они берут пункты в работу
+ * и закрывают их (прозрачность прогресса). todo_create (создание листа) — НЕ
+ * субам: лист создаёт главный агент / planner.
+ */
+const TODO_WORKER_TOOLS = ['todo_update', 'todo_list'] as const
+
+/**
  * Инструменты, которые субагенту НИКОГДА нельзя давать — независимо от роли.
- * delegate_* = рекурсивное делегирование (Фаза 4), запрещено как защита от
- * бесконечной рекурсии и взрыва стоимости. Остальное — тяжёлые/побочные
- * операции, не относящиеся к узкой подзадаче субагента.
+ * delegate_* / orchestrate = рекурсивное делегирование (Фаза 4), запрещено как
+ * защита от бесконечной рекурсии и взрыва стоимости. orchestrate вызывает только
+ * ГЛАВНЫЙ агент. Остальное — тяжёлые/побочные операции, не относящиеся к узкой
+ * подзадаче субагента.
  */
 export const SUBAGENT_FORBIDDEN_TOOLS: ReadonlySet<string> = new Set([
   'delegate_task',
-  'delegate_parallel'
+  'delegate_parallel',
+  'orchestrate'
 ])
 
 /**
@@ -47,17 +57,25 @@ export function getRoleToolset(role?: string | null): string[] {
   let tools: string[]
   switch (role) {
     case 'executor':
-      tools = [...READ_ONLY_TOOLS, 'apply_patch', 'write_file', 'run_command', 'check_diagnostics']
+      // executor берёт пункты todo в работу и закрывает + сохраняет находки в память.
+      tools = [...READ_ONLY_TOOLS, ...TODO_WORKER_TOOLS, 'apply_patch', 'write_file', 'run_command', 'check_diagnostics', 'memory_save']
       break
     case 'verifier':
-      tools = [...READ_ONLY_TOOLS, 'check_diagnostics', 'run_command']
+      // verifier отмечает прогресс по todo + фиксирует выводы верификации в память (Идея 8).
+      tools = [...READ_ONLY_TOOLS, ...TODO_WORKER_TOOLS, 'check_diagnostics', 'run_command', 'memory_save']
       break
     case 'researcher':
-    case 'critic':
+      // researcher берёт/закрывает todo + сохраняет находки в долговременную память (Идея 8).
+      tools = [...READ_ONLY_TOOLS, ...TODO_WORKER_TOOLS, 'memory_save']
+      break
     case 'planner':
+      // planner может создавать todo-лист (декомпозиция) + видеть прогресс.
+      tools = [...READ_ONLY_TOOLS, 'todo_create', ...TODO_WORKER_TOOLS]
+      break
+    case 'critic':
     default:
-      // researcher/critic/planner и неизвестная/пустая роль — строго read-only
-      tools = [...READ_ONLY_TOOLS]
+      // critic и неизвестная/пустая роль — read-only + просмотр прогресса todo.
+      tools = [...READ_ONLY_TOOLS, 'todo_list']
       break
   }
   // Defence-in-depth: даже если выше кто-то добавит delegate_* — вырезаем.

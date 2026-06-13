@@ -30,6 +30,7 @@ import { createSettings } from './storage/settings'
 import { createChats } from './storage/chats'
 import { createChatSessions } from './storage/chat-sessions'
 import { createSubSessions } from './storage/sub-sessions'
+import { createSessionTodos } from './storage/session-todos'
 import { registerAgentsIpc } from './ipc/agents'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
@@ -211,6 +212,7 @@ app.whenReady().then(() => {
   const chats = createChats(db)
   const chatSessions = createChatSessions(db)
   const subSessions = createSubSessions(db)
+  const sessionTodos = createSessionTodos(db)
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
@@ -307,10 +309,17 @@ app.whenReady().then(() => {
       update: (id, patch) => subSessions.update(id, patch),
       appendMessage: (subSessionId, projectPath, role, content) =>
         chats.appendToSession(subSessionId, projectPath, role, content)
+    },
+    // TodoGate (Фаза 3) — оркестрационный todo-лист сессии для todo_* / orchestrate.
+    sessionTodos: {
+      createBatch: (opts) => sessionTodos.createBatch(opts),
+      update: (id, patch) => sessionTodos.update(id, patch as { status?: import('./storage/session-todos').TodoStatus; assigneeCallId?: string | null }),
+      list: (projectPath, sessionId) => sessionTodos.list(projectPath, sessionId),
+      findByTitle: (projectPath, sessionId, title) => sessionTodos.findByTitle(projectPath, sessionId, title)
     }
   })
   registerChatsIpc(chats, chatSessions, db)
-  registerAgentsIpc(subSessions, chats)
+  registerAgentsIpc(subSessions, chats, sessionTodos)
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)
