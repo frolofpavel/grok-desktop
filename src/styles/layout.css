@@ -5972,3 +5972,98 @@ html[data-theme="light"] .gg-thinking-body { background: rgba(0,0,0,0.03); }
   font-size: 12px;
   color: var(--text-tertiary);
 }
+
+/* === Agents Panel (Фаза 2 — мультиагентность: суб-сессии + очередь) === */
+.gg-agents-toolbar { align-items: center; }
+.gg-agents-select {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  max-width: 160px;
+}
+.gg-agents-toolbar-spacer { flex: 1; }
+.gg-agents-cancel { color: var(--error); }
+
+.gg-agent-card {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.gg-agent-card.is-running { border-color: var(--accent); }
+.gg-agent-card.is-error { border-color: var(--error); }
+.gg-agent-card.is-cancelled { opacity: 0.7; }
+
+.gg-agent-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+}
+.gg-agent-card-main:hover { background: var(--bg-hover); }
+
+.gg-agent-status-dot {
+  flex-shrink: 0;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+.gg-agent-status-dot.is-running { background: var(--accent); animation: gg-pulse 1.4s ease-in-out infinite; }
+.gg-agent-status-dot.is-done { background: var(--success, #3fb950); }
+.gg-agent-status-dot.is-error { background: var(--error); }
+.gg-agent-status-dot.is-cancelled { background: var(--text-tertiary); }
+
+@keyframes gg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.gg-agent-role { font-weight: 600; font-size: 13px; flex-shrink: 0; }
+.gg-agent-provider { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+.gg-agent-task {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gg-agent-meta { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+
+.gg-agent-card-cancel {
+  flex-shrink: 0;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  cursor: pointer;
+  font-size: 13px;
+}
+.gg-agent-card-cancel:hover { background: var(--bg-hover); }
+
+/* Просмотр истории суб-сессии — сообщения в модалке Debug-стиля. */
+.gg-agents-msg { margin: 10px 0; }
+.gg-agents-msg-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+.gg-agents-msg-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.gg-agents-msg.is-user .gg-agents-msg-body {
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+}

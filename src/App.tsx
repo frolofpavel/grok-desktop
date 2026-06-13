@@ -14,6 +14,7 @@ import { DesignView } from './components/DesignView'
 import { StubView } from './components/StubView'
 import { SkillsView } from './components/SkillsView'
 import { AgentRunInspector } from './components/AgentRunInspector'
+import { AgentsPanel } from './components/AgentsPanel'
 import { WorkflowView } from './components/WorkflowView'
 import { MemoryGovernance } from './components/MemoryGovernance'
 import { DiffView } from './components/DiffView'
@@ -249,6 +250,7 @@ export function App() {
         {activeView === 'tasks' && <TasksView />}
         {activeView === 'journal' && <JournalView />}
         {activeView === 'inspector' && <AgentRunInspector />}
+        {activeView === 'agents' && <AgentsPanel />}
         {activeView === 'memory-gov' && <MemoryGovernance />}
         {activeView === 'plan' && <PlanView />}
         {activeView === 'workflow' && <WorkflowView />}

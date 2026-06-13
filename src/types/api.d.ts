@@ -277,6 +277,13 @@ declare global {
       debug: {
         packet(runId: string): Promise<DebugPacket>
       }
+      // Панель Agents (Фаза 2) — персистентные суб-сессии + массовая отмена.
+      agents: {
+        list(projectPath: string): Promise<SubSession[]>
+        history(subSessionId: number): Promise<StoredChatMessage[]>
+        cancel(filter: { all?: boolean; group?: string | null; role?: string | null }): Promise<number>
+        queueStats(): Promise<{ inFlight: number; queued: number; tracked: number }>
+      }
       suggestions: {
         get(projectPath: string): Promise<Suggestion[]>
       }
@@ -397,6 +404,25 @@ export interface DebugPacket {
   input: RunInput | null
   audit: AuditEntry[]
   messages: StoredChatMessage[]
+}
+
+/** Персистентная суб-сессия делегированного агента (Фаза 2). */
+export interface SubSession {
+  id: number
+  projectPath: string
+  parentChatId: number | null
+  role: string | null
+  status: string | null          // running / done / error / cancelled
+  task: string | null
+  group: string | null
+  toolCount: number | null
+  costCents: number | null
+  callId: string | null
+  providerId: string | null
+  model: string | null
+  startedAt: number | null
+  endedAt: number | null
+  createdAt: number
 }
 
 /** Дескриптор провайдера — единый источник из main process (electron/ai/registry.ts). */

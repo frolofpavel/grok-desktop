@@ -292,6 +292,14 @@ const MemoryIcon = (
     <path d="M12 2v16" />
   </svg>
 )
+const AgentsIcon = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="7" r="3" />
+    <circle cx="5" cy="17" r="2.5" />
+    <circle cx="19" cy="17" r="2.5" />
+    <path d="M12 10v3M10 13l-3.5 2M14 13l3.5 2" />
+  </svg>
+)
 
 // Chat is rendered separately above the rest of the nav (expandable section
 // with its own list of chat sessions + create button).
@@ -310,6 +318,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
     { id: 'tasks',    label: t.sidebar.tasks,    icon: TasksIcon },
     { id: 'journal',  label: t.sidebar.journal,  icon: JournalIcon },
     { id: 'inspector', label: 'Инспектор',       icon: InspectorIcon },
+    { id: 'agents',   label: 'Агенты',           icon: AgentsIcon },
     { id: 'memory-gov', label: 'Память',          icon: MemoryIcon },
     { id: 'plan',     label: t.sidebar.plan,     icon: PlanIcon },
     { id: 'skills',   label: t.sidebar.skills,   icon: SkillsIcon },

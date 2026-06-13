@@ -29,6 +29,8 @@ import { openDb } from './storage/db'
 import { createSettings } from './storage/settings'
 import { createChats } from './storage/chats'
 import { createChatSessions } from './storage/chat-sessions'
+import { createSubSessions } from './storage/sub-sessions'
+import { registerAgentsIpc } from './ipc/agents'
 import { createTasks } from './storage/tasks'
 import { createJournal } from './storage/journal'
 import { createProjects } from './storage/projects'
@@ -208,6 +210,7 @@ app.whenReady().then(() => {
 
   const chats = createChats(db)
   const chatSessions = createChatSessions(db)
+  const subSessions = createSubSessions(db)
   const tasks = createTasks(db)
   const journal = createJournal(db)
   const projects = createProjects(db)
@@ -297,9 +300,17 @@ app.whenReady().then(() => {
     // Debug Packet — снапшот реального входа run'а (provider/model/system/user)
     saveRunInput: (input) => {
       saveRunInput(db, input)
+    },
+    // Персистентные суб-сессии (Фаза 2) — delegate_* пишут историю субов в БД.
+    subSessions: {
+      create: (opts) => subSessions.create(opts),
+      update: (id, patch) => subSessions.update(id, patch),
+      appendMessage: (subSessionId, projectPath, role, content) =>
+        chats.appendToSession(subSessionId, projectPath, role, content)
     }
   })
   registerChatsIpc(chats, chatSessions, db)
+  registerAgentsIpc(subSessions, chats)
   registerHandoffIpc(chats, chatSessions)
   registerTasksIpc(tasks)
   registerJournalIpc(journal)

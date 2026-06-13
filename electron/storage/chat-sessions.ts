@@ -5,8 +5,11 @@ import type { Database } from 'better-sqlite3'
  *  - 'main'   — обычные чаты пользователя, показываются в Sidebar
  *  - 'review' — sub-чаты ревьюера, спрятаны от Sidebar, висят как pill в
  *               Timeline родительского чата через parentChatId.
+ *  - 'subagent' — персистентные суб-сессии делегированных агентов (Фаза 2).
+ *               Тоже спрятаны от Sidebar, привязаны к main-чату через
+ *               parentChatId. Метаданные суба — в sub-sessions.ts.
  */
-export type ChatKind = 'main' | 'review'
+export type ChatKind = 'main' | 'review' | 'subagent'
 
 export interface ChatSession {
   id: number

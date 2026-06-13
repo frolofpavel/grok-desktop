@@ -63,6 +63,9 @@ interface AiDeps {
   /** Опциональный снапшот реального входа run'а для Debug Packet. Вызывается на
    *  старте run'а в API-пути, где собран композитный system prompt. */
   saveRunInput?: (input: { runId: string; projectPath: string | null; chatId: number | null; timestamp: number; providerId: string | null; model: string | null; systemPrompt: string; userMessage: string }) => void
+  /** Фасад персистентных суб-сессий (Фаза 2, Идея 1). Прокидывается в ToolContext,
+   *  чтобы delegate_task/delegate_parallel сохраняли историю субагентов в БД. */
+  subSessions?: ToolContext['subSessions']
 }
 
 let currentSendId = 0
@@ -408,7 +411,9 @@ export function registerAiIpc(deps: AiDeps): void {
       void runApiConversation(taggedSender, sendId, provider, tools, projectPath, messagesWithSystem, ctrl.signal, deps.recordWrite, deps.recordPlan, deps.recordJournal, deps.readJournal, deps.saveMemory, deps.searchMemories, deps.searchConversations, deps.connectors, deps.getAgentMode(), turnsBudget, deps.skillRegistry, deps.getSecret, costGuard, providerId, model,
         deps.mcpClient,
         auditFn,
-        deps.trackToolPattern
+        deps.trackToolPattern,
+        chatId ? Number(chatId) : null,
+        deps.subSessions
       ).finally(cleanup)
     } else {
       void runPlainConversation(taggedSender, sendId, provider, projectPath, messagesWithSystem, ctrl.signal, deps.recordJournal, costGuard, providerId, model).finally(cleanup)
@@ -620,7 +625,9 @@ async function runApiConversation(
   model?: string,
   mcpClientRef?: McpClient,
   appendAuditFn?: (action: string, detail: string) => void,
-  trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void
+  trackToolPatternFn?: (projectPath: string, event: ToolEvent) => void,
+  parentChatId?: number | null,
+  subSessions?: AiDeps['subSessions']
 ): Promise<void> {
   const currentMessages = [...initialMessages]
   // Loop detection: per-signature occurrence counter across the whole agent
@@ -817,7 +824,10 @@ async function runApiConversation(
       appendAudit: appendAuditFn,
       // Cost guard сессии — субагенты (delegate_task/delegate_parallel) учитывают
       // свои токены в этот же cap, чтобы не обойти лимит сессии (Фаза 1).
-      subCostGuard: costGuard
+      subCostGuard: costGuard,
+      // Персистентные суб-сессии (Фаза 2): родитель + фасад БД.
+      parentChatId,
+      subSessions
     }
     const writePromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []
     const readPromises: Array<{ idx: number; promise: Promise<ToolResult> }> = []

@@ -315,6 +315,36 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       db.exec('ALTER TABLE plan_steps ADD COLUMN verification_status TEXT')
       db.exec('ALTER TABLE plan_steps ADD COLUMN changed_files_count INTEGER')
     }
+  },
+  {
+    version: 12,
+    description: 'Persistent sub-agent sessions (Фаза 2): kind=subagent + метаданные суба (role/status/task/group_tag/tool_count/cost/call_id/provider/model)',
+    run: (db: DB) => {
+      // kind уже TEXT с DEFAULT 'main' (миграция 2) — добавляем лишь новое
+      // значение 'subagent', схему менять не нужно. Здесь только доп. колонки
+      // с метаданными субагента. Все NULL для существующих main/review-сессий —
+      // субовые поля заполняются только при kind='subagent'.
+      const cols = (db.prepare('PRAGMA table_info(chat_sessions)').all() as Array<{ name: string }>).map(c => c.name)
+      // sub_role — роль субагента (researcher / executor / critic / planner / verifier).
+      if (!cols.includes('sub_role')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_role TEXT')
+      // sub_status — running / done / error / cancelled. Переживает перезагрузку,
+      // в отличие от эфемерной subagent-run карточки.
+      if (!cols.includes('sub_status')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_status TEXT')
+      // sub_task — краткий текст задачи (промпт суба), для панели Agents.
+      if (!cols.includes('sub_task')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_task TEXT')
+      // sub_group — тег/группа батча для массовой отмены по тегу (Идея 6).
+      if (!cols.includes('sub_group')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_group TEXT')
+      // sub_tool_count — сколько tool-вызовов сделал суб (счётчик из loop'а).
+      if (!cols.includes('sub_tool_count')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_tool_count INTEGER')
+      // sub_cost_cents — стоимость суба в центах (из cost-guard), для панели.
+      if (!cols.includes('sub_cost_cents')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_cost_cents INTEGER')
+      // sub_call_id — callId эфемерной subagent-run карточки → связь UI ↔ сессия.
+      if (!cols.includes('sub_call_id')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_call_id TEXT')
+      // sub_started_at / sub_ended_at — для подсчёта длительности в панели.
+      if (!cols.includes('sub_started_at')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_started_at INTEGER')
+      if (!cols.includes('sub_ended_at')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_ended_at INTEGER')
+      db.exec("CREATE INDEX IF NOT EXISTS idx_chat_sessions_subagent ON chat_sessions(parent_chat_id, kind) WHERE kind = 'subagent'")
+    }
   }
 ]
 

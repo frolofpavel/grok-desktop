@@ -45,6 +45,12 @@ const execFileAsync = promisify(execFile)
 // вторая, независимая граница; таймаут страхует от зависшего провайдера/команды.
 const SUB_TASK_TIMEOUT_MS = 180_000
 
+// Cost-cap на ОДИН delegate_parallel вызов (помимо cap всей сессии из Settings).
+// Защищает от батча из 30 задач, который один пожрёт весь бюджет: при превышении
+// оставшиеся задачи батча не стартуют. В центах. Дефолт $3 — можно переопределить
+// аргументом cost_cap_usd у delegate_parallel.
+const DEFAULT_BATCH_COST_CAP_CENTS = 300
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -109,6 +115,16 @@ export interface ToolContext {
   subProviderId?: import('../ai/registry').ProviderId
   /** Модель субагента — для cost-guard учёта внутри sub-loop. */
   subModel?: string
+  /** ID главного чата — родитель для персистентных суб-сессий (Фаза 2). */
+  parentChatId?: number | null
+  /** Фасад персистентных суб-сессий (Фаза 2, Идея 1). Опционально — без него
+   *  субагенты работают как прежде (только эфемерная карточка). */
+  subSessions?: {
+    create: (opts: { projectPath: string; parentChatId: number | null; role?: string | null; task?: string | null; group?: string | null; callId?: string | null; providerId?: string | null; model?: string | null }) => number
+    update: (id: number, patch: { status?: string; toolCount?: number; costCents?: number; endedAt?: number }) => void
+    /** Сохранить одно сообщение turn суба (user/assistant) в историю сессии. */
+    appendMessage: (subSessionId: number, projectPath: string, role: 'user' | 'assistant', content: string) => void
+  }
 }
 
 export type ToolMode = 'parallel-read' | 'sequential' | 'confirm-write'
@@ -628,22 +644,49 @@ const delegateTaskHandler: ToolHandler = {
       }
       emitSubagent('running')
 
+      // Персистентная суб-сессия (Фаза 2, Идея 1): создаём строку kind='subagent',
+      // привязанную к главному чату. Промпт суба сохраняем как первое сообщение.
+      // Без subSessions фасада — работает как прежде (только эфемерная карточка).
+      let subSessionId: number | null = null
+      if (ctx.subSessions) {
+        try {
+          subSessionId = ctx.subSessions.create({
+            projectPath: ctx.projectPath,
+            parentChatId: ctx.parentChatId ?? null,
+            role, task: prompt, callId: call.id,
+            providerId: subProvider ?? ctx.currentProviderId ?? null,
+            model: subModel ?? null
+          })
+          ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', prompt)
+        } catch { /* persist не критично — карточка всё равно покажется */ }
+      }
+      const finalizeSub = (status: string, assistant?: string) => {
+        if (subSessionId == null || !ctx.subSessions) return
+        try {
+          if (assistant) ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'assistant', assistant)
+          ctx.subSessions.update(subSessionId, { status, endedAt: Date.now() })
+        } catch { /* persist не критично */ }
+      }
+
       const { createProvider, PROVIDERS } = await import('../ai/registry')
       const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
       const { getRoleToolset } = await import('../ai/role-tools')
       const fallbackProvider = subProvider ?? ctx.currentProviderId ?? null
       if (!fallbackProvider) {
         emitSubagent('error', 'нет провайдера')
+        finalizeSub('error')
         return { id: call.id, name: call.name, result: '', error: 'delegate_task: provider_id не задан и у текущего чата нет провайдера. Укажи provider_id явно.' }
       }
       const descriptor = PROVIDERS[fallbackProvider as keyof typeof PROVIDERS]
       if (!descriptor) {
         emitSubagent('error', `неизвестный provider ${fallbackProvider}`)
+        finalizeSub('error')
         return { id: call.id, name: call.name, result: '', error: `delegate_task: неизвестный provider ${fallbackProvider}` }
       }
       const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
       if (descriptor.secretKey && !apiKey) {
         emitSubagent('error', `нет API key для ${fallbackProvider}`)
+        finalizeSub('error')
         return { id: call.id, name: call.name, result: '', error: `delegate_task: нет API key для ${fallbackProvider}` }
       }
 
@@ -653,6 +696,21 @@ const delegateTaskHandler: ToolHandler = {
       const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
       const parentAbortHandler = () => taskAc.abort()
       ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+
+      // Глобальная очередь (Идея 6): ждём слот в семафоре процесса. Группа —
+      // опциональный group-тег, чтобы суб можно было отменить массово.
+      const { subAgentQueue } = await import('../ai/sub-queue')
+      const groupTag = call.args.group ? String(call.args.group) : null
+      let queueSlot: { release: () => void; ticketId: number } | null = null
+      try {
+        queueSlot = await subAgentQueue.enter({ group: groupTag, role, abort: () => taskAc.abort() }, taskAc.signal)
+      } catch {
+        clearTimeout(timeoutId)
+        ctx.signal.removeEventListener('abort', parentAbortHandler)
+        emitSubagent('error', 'отменён в очереди')
+        finalizeSub('cancelled')
+        return { id: call.id, name: call.name, result: '', error: 'delegate_task: задача отменена в очереди' }
+      }
 
       try {
         const provider = createProvider(fallbackProvider as keyof typeof PROVIDERS, {
@@ -679,14 +737,17 @@ const delegateTaskHandler: ToolHandler = {
         })
         if (res.exitReason === 'error') {
           emitSubagent('error', res.error)
+          finalizeSub('error', res.text.trim() || undefined)
           return { id: call.id, name: call.name, result: '', error: `delegate_task error: ${res.error}` }
         }
         const trimmed = res.text.trim()
         if (!trimmed) {
           emitSubagent('error', 'sub-agent вернул пустой ответ')
+          finalizeSub('error')
           return { id: call.id, name: call.name, result: '', error: 'delegate_task: sub-agent вернул пустой ответ' }
         }
         emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
+        finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
         try {
           ctx.recordJournal(ctx.projectPath, 'note',
             `🎭 Делегирование → ${skill?.name ?? skillId ?? role ?? fallbackProvider} (${res.toolCallCount} tools, ${res.exitReason})`,
@@ -696,6 +757,7 @@ const delegateTaskHandler: ToolHandler = {
       } finally {
         clearTimeout(timeoutId)
         ctx.signal.removeEventListener('abort', parentAbortHandler)
+        queueSlot?.release()
       }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
@@ -715,14 +777,32 @@ const delegateParallelHandler: ToolHandler = {
       if (!Array.isArray(tasks) || tasks.length === 0) {
         return { id: call.id, name: call.name, result: '', error: 'delegate_parallel: tasks обязателен и не должен быть пустым' }
       }
-      // Практический лимит повышен (было 5). Claude Code позволяет десятки агентов.
-      // Мы держим разумный потолок + concurrency, чтобы не убить rate limits и UI.
-      const MAX_PARALLEL = 12
+      // Потолок поднят до 50 (было 12): задачи держатся в глобальной очереди
+      // (sub-queue), а одновременно стримит не больше GLOBAL_SUB_CONCURRENCY —
+      // т.е. 50 в очереди не убивают провайдер. См. Фаза 2, Идея 6.
+      const MAX_PARALLEL = 50
       if (tasks.length > MAX_PARALLEL) {
-        return { id: call.id, name: call.name, result: '', error: `delegate_parallel: максимум ${MAX_PARALLEL} параллельных задач` }
+        return { id: call.id, name: call.name, result: '', error: `delegate_parallel: максимум ${MAX_PARALLEL} задач в одном батче` }
       }
 
+      // Группа/тег батча — для массовой отмены «по тегу» (Идея 6). Если не задан
+      // явно — используем callId как авто-группу, чтобы можно было отменить весь
+      // этот конкретный delegate_parallel разом.
+      const groupTag = call.args.group ? String(call.args.group) : call.id
+
+      // Cost-cap на весь батч (Идея 6): помимо cap всей сессии. Параметр
+      // cost_cap_usd опционален; дефолт — DEFAULT_BATCH_COST_CAP_CENTS.
+      const batchCapCents = typeof call.args.cost_cap_usd === 'number' && call.args.cost_cap_usd > 0
+        ? Math.round(call.args.cost_cap_usd * 100)
+        : DEFAULT_BATCH_COST_CAP_CENTS
+      // Стартовая стоимость сессии — батч считаем как прирост сверх неё.
+      const batchStartCents = ctx.subCostGuard?.current() ?? 0
+      // Флаг «батч превысил cap» — взводится первой задачей, которая увидела
+      // превышение; остальные ожидающие задачи в очереди не стартуют.
+      let batchCapped = false
+
       const { createProvider, PROVIDERS } = await import('../ai/registry')
+      const { subAgentQueue, GLOBAL_SUB_CONCURRENCY } = await import('../ai/sub-queue')
 
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
@@ -731,35 +811,17 @@ const delegateParallelHandler: ToolHandler = {
           callId: call.id,
           name: 'delegate_parallel',
           label: 'delegate_parallel',
-          detail: `${tasks.length} задач параллельно`,
+          detail: `${tasks.length} задач (очередь, ≤${GLOBAL_SUB_CONCURRENCY} разом)`,
           status: 'ok'
         }
       })
 
-      // Простой concurrency-контроль без новых зависимостей.
-      // Запускаем батчами по CONCURRENCY — защищает провайдеры (особенно grok-cli) и не захламляет timeline.
-      const CONCURRENCY = 4
-
-      async function processInBatches<T, R>(
-        items: T[],
-        batchSize: number,
-        processor: (item: T, index: number) => Promise<R>
-      ): Promise<PromiseSettledResult<R>[]> {
-        const results: PromiseSettledResult<R>[] = []
-        for (let i = 0; i < items.length; i += batchSize) {
-          const batch = items.slice(i, i + batchSize)
-          const batchResults = await Promise.allSettled(
-            batch.map((item, batchIdx) => processor(item, i + batchIdx))
-          )
-          results.push(...batchResults)
-        }
-        return results
-      }
-
       const { runSubAgentLoop } = await import('../ai/sub-agent-loop')
       const { getRoleToolset } = await import('../ai/role-tools')
 
-      const results = await processInBatches(tasks, CONCURRENCY, async (task, _idx) => {
+      // Запускаем ВСЕ задачи сразу — глобальный семафор сам ограничит реальную
+      // одновременность. Это даёт честную очередь (а не локальные батчи по 4).
+      const results = await Promise.allSettled(tasks.map(async (task) => {
         // Идея 9: provider задаётся per-task → в одном батче можно смешивать
         // grok (API) и grok-cli (Grok Build). Здесь каждая задача независимо
         // резолвит свой провайдер.
@@ -793,14 +855,37 @@ const delegateParallelHandler: ToolHandler = {
         }
         emitSubagent('running')
 
+        // Персистентная суб-сессия (Идея 1). Каждая задача батча — своя сессия.
+        let subSessionId: number | null = null
+        if (ctx.subSessions) {
+          try {
+            subSessionId = ctx.subSessions.create({
+              projectPath: ctx.projectPath,
+              parentChatId: ctx.parentChatId ?? null,
+              role: task.role ?? null, task: task.prompt, group: groupTag, callId: subCallId,
+              providerId, model: task.model ?? null
+            })
+            ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'user', task.prompt)
+          } catch { /* persist не критично */ }
+        }
+        const finalizeSub = (status: string, assistant?: string) => {
+          if (subSessionId == null || !ctx.subSessions) return
+          try {
+            if (assistant) ctx.subSessions.appendMessage(subSessionId, ctx.projectPath, 'assistant', assistant)
+            ctx.subSessions.update(subSessionId, { status, toolCount, endedAt: Date.now() })
+          } catch { /* persist не критично */ }
+        }
+
         const descriptor = PROVIDERS[providerId as keyof typeof PROVIDERS]
         if (!descriptor) {
           emitSubagent('error', `неизвестный provider ${providerId}`)
+          finalizeSub('error')
           throw new Error(`неизвестный provider ${providerId}`)
         }
         const apiKey = descriptor.secretKey ? ctx.getSecretForDelegate?.(descriptor.secretKey) ?? null : null
         if (descriptor.secretKey && !apiKey) {
           emitSubagent('error', `нет API key для ${providerId}`)
+          finalizeSub('error')
           throw new Error(`нет API key для ${providerId}`)
         }
 
@@ -810,6 +895,27 @@ const delegateParallelHandler: ToolHandler = {
         const timeoutId = setTimeout(() => taskAc.abort(), SUB_TASK_TIMEOUT_MS)
         const parentAbortHandler = () => taskAc.abort()
         ctx.signal.addEventListener('abort', parentAbortHandler, { once: true })
+
+        // Глобальная очередь: ждём слот. Если батч уже превысил cost-cap пока
+        // мы стояли в очереди — не стартуем (экономим деньги).
+        let queueSlot: { release: () => void; ticketId: number } | null = null
+        try {
+          queueSlot = await subAgentQueue.enter({ group: groupTag, role: task.role ?? null, abort: () => taskAc.abort() }, taskAc.signal)
+        } catch {
+          clearTimeout(timeoutId)
+          ctx.signal.removeEventListener('abort', parentAbortHandler)
+          emitSubagent('error', 'отменён в очереди')
+          finalizeSub('cancelled')
+          throw new Error('отменён в очереди')
+        }
+        if (batchCapped) {
+          clearTimeout(timeoutId)
+          ctx.signal.removeEventListener('abort', parentAbortHandler)
+          queueSlot.release()
+          emitSubagent('error', 'батч остановлен по cost-cap')
+          finalizeSub('cancelled')
+          throw new Error('батч остановлен по cost-cap')
+        }
 
         try {
           const subModel = task.model ?? descriptor.defaultModel
@@ -839,21 +945,33 @@ const delegateParallelHandler: ToolHandler = {
             signal: taskAc.signal, role: task.role,
             onToolActivity: () => { toolCount++; emitSubagent('running') }
           })
-          if (res.exitReason === 'error') throw new Error(res.error ?? 'sub-agent error')
+          // Cost-cap батча: после каждой задачи смотрим прирост стоимости сессии.
+          // Превысили — взводим флаг + отменяем ещё бегущие/ждущие задачи группы.
+          if (ctx.subCostGuard) {
+            const spentByBatch = ctx.subCostGuard.current() - batchStartCents
+            if (spentByBatch >= batchCapCents && !batchCapped) {
+              batchCapped = true
+              subAgentQueue.cancel({ group: groupTag })
+            }
+          }
+          if (res.exitReason === 'error') { finalizeSub('error', res.text.trim() || undefined); throw new Error(res.error ?? 'sub-agent error') }
           const trimmed = res.text.trim()
-          if (!trimmed) throw new Error('sub-agent вернул пустой ответ')
+          if (!trimmed) { finalizeSub('error'); throw new Error('sub-agent вернул пустой ответ') }
           emitSubagent('done', trimmed.length > 1200 ? trimmed.slice(0, 1200) + '…' : trimmed)
+          finalizeSub(res.exitReason === 'aborted' ? 'cancelled' : 'done', trimmed)
           return { id: task.id, result: trimmed }
         } catch (taskErr) {
           // Любой неожиданный throw (createProvider, abort/timeout) — карточка
           // не должна застрять на 'running'. Rethrow → Promise.allSettled reject.
           emitSubagent('error', taskErr instanceof Error ? taskErr.message : String(taskErr))
+          finalizeSub('error')
           throw taskErr
         } finally {
           clearTimeout(timeoutId)
           ctx.signal.removeEventListener('abort', parentAbortHandler)
+          queueSlot?.release()
         }
-      })
+      }))
 
       const output = results.map((r, i) => {
         const taskId = tasks[i].id
@@ -868,11 +986,14 @@ const delegateParallelHandler: ToolHandler = {
       const successCount = results.filter(r => r.status === 'fulfilled').length
       try {
         ctx.recordJournal(ctx.projectPath, 'note',
-          `🔀 delegate_parallel — ${successCount}/${tasks.length} успешно`,
+          `🔀 delegate_parallel — ${successCount}/${tasks.length} успешно${batchCapped ? ' (стоп по cost-cap батча)' : ''}`,
           tasks.map(t => t.id).join(', '))
       } catch { /* journal не критично */ }
 
-      return { id: call.id, name: call.name, result: output }
+      const capNote = batchCapped
+        ? `\n\n---\n\n⚠️ Батч остановлен: превышен cost-cap $${(batchCapCents / 100).toFixed(2)} на один delegate_parallel. Оставшиеся задачи не выполнены.`
+        : ''
+      return { id: call.id, name: call.name, result: output + capNote }
     } catch (err) {
       return { id: call.id, name: call.name, result: '', error: err instanceof Error ? err.message : String(err) }
     }

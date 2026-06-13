@@ -291,6 +291,10 @@ export const TOOL_DEFS: ToolDefinition[] = [
         prompt: {
           type: 'string',
           description: 'Что именно нужно от sub-agent. Конкретный запрос с контекстом.'
+        },
+        group: {
+          type: 'string',
+          description: 'Опционально — тег/группа для массовой отмены субагентов через панель Agents.'
         }
       },
       required: ['prompt']
@@ -319,7 +323,15 @@ export const TOOL_DEFS: ToolDefinition[] = [
             },
             required: ['id', 'prompt']
           },
-          description: 'Массив подзадач (рекомендуется 2-8, макс. 12)'
+          description: 'Массив подзадач (рекомендуется 2-8, до 50 — они держатся в глобальной очереди и стримятся по несколько разом)'
+        },
+        group: {
+          type: 'string',
+          description: 'Опционально — тег/группа батча для массовой отмены через панель Agents. Если не задан — группой служит сам вызов.'
+        },
+        cost_cap_usd: {
+          type: 'number',
+          description: 'Опционально — лимит стоимости $ на ВЕСЬ этот батч (помимо cap сессии). При превышении оставшиеся задачи не выполняются. По умолчанию $3.'
         }
       },
       required: ['tasks']
