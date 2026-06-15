@@ -932,8 +932,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                       чтобы не захламлять чат (поддержка "до 100 агентов" в стиле Claude Code). */}
                   {subagentRuns.length > 5 && (
                     <div className="gg-subagent-summary">
-                      🤖 Параллельных агентов: {subagentRuns.length} • 
-                      готово {subagentRuns.filter(s => s.status === 'done').length} • 
+                      🤖 Параллельных агентов: {subagentRuns.length} •
+                      готово {subagentRuns.filter(s => s.status === 'done').length} •
                       ошибок {subagentRuns.filter(s => s.status === 'error').length}
                     </div>
                   )}
