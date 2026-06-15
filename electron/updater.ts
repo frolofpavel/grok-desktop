@@ -1,25 +1,29 @@
 import { autoUpdater } from 'electron-updater'
-import { BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain } from 'electron'
 
-// Используем console вместо electron-log (не хотим лишней зависимости)
 autoUpdater.logger = null
 autoUpdater.autoDownload = true
-autoUpdater.autoInstallOnAppQuit = true
+autoUpdater.autoInstallOnAppQuit = false
+
+const STARTUP_CHECK_MS = 4_000
+const PERIODIC_CHECK_MS = 4 * 60 * 60 * 1000
 
 export function initAutoUpdater(mainWindow: BrowserWindow): void {
-  // Проверяем обновления через 10 секунд после старта (не блокируем UI)
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch(() => {
-      // Нет интернета или GitHub недоступен — молча продолжаем
-    })
-  }, 10_000)
+  if (!app.isPackaged) return
 
-  // Повторная проверка каждые 4 часа
-  setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => {})
-  }, 4 * 60 * 60 * 1000)
+  ipcMain.handle('update:install', () => {
+    autoUpdater.quitAndInstall(false, true)
+  })
 
-  // Events → renderer
+  ipcMain.handle('update:check', async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { available: !!result?.updateInfo?.version && result.updateInfo.version !== app.getVersion(), version: result?.updateInfo?.version }
+    } catch {
+      return { available: false, error: 'Не удалось проверить обновления' }
+    }
+  })
+
   autoUpdater.on('checking-for-update', () => {
     sendToRenderer(mainWindow, 'update:checking')
   })
@@ -27,7 +31,7 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
   autoUpdater.on('update-available', (info) => {
     sendToRenderer(mainWindow, 'update:available', {
       version: info.version,
-      releaseDate: info.releaseDate,
+      releaseDate: info.releaseDate
     })
   })
 
@@ -39,35 +43,24 @@ export function initAutoUpdater(mainWindow: BrowserWindow): void {
     sendToRenderer(mainWindow, 'update:progress', {
       percent: Math.round(progress.percent),
       transferred: progress.transferred,
-      total: progress.total,
+      total: progress.total
     })
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    sendToRenderer(mainWindow, 'update:downloaded', {
-      version: info.version,
-    })
+    sendToRenderer(mainWindow, 'update:downloaded', { version: info.version })
   })
 
   autoUpdater.on('error', (err) => {
-    // Не показываем ошибку пользователю — обновления не критичны
     console.warn('[updater] error:', err.message)
   })
 
-  // IPC: renderer может запросить установку
-  ipcMain.handle('update:install', () => {
-    autoUpdater.quitAndInstall(false, true)
-  })
+  const runCheck = () => {
+    autoUpdater.checkForUpdates().catch(() => {})
+  }
 
-  // IPC: ручная проверка из Settings
-  ipcMain.handle('update:check', async () => {
-    try {
-      const result = await autoUpdater.checkForUpdates()
-      return { available: !!result?.updateInfo, version: result?.updateInfo?.version }
-    } catch {
-      return { available: false, error: 'Не удалось проверить обновления' }
-    }
-  })
+  setTimeout(runCheck, STARTUP_CHECK_MS)
+  setInterval(runCheck, PERIODIC_CHECK_MS)
 }
 
 function sendToRenderer(win: BrowserWindow, channel: string, data?: unknown): void {

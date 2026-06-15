@@ -425,6 +425,9 @@ export function registerAiIpc(deps: AiDeps): void {
     return sendId
   })
 
+  /** Список sendId с живым AbortController — источник правды для renderer watchdog. */
+  ipcMain.handle('ai:active-sends', () => Array.from(activeAborts.keys()))
+
   ipcMain.handle('ai:stop', (_e, sendId: number) => {
     // sendId <= 0 → emergency abort: stop EVERY active stream + reject all pending
     // confirmations. Used by Shift+Esc when the UI feels stuck.

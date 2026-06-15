@@ -23,7 +23,13 @@ export type StepStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed'
 export interface PlanStep { id: number; planId: number; idx: number; title: string; detail: string | null; status: StepStatus; result: string | null; runId?: string | null; verificationStatus?: string | null; changedFilesCount?: number | null }
 export interface Plan { id: number; title: string; status: PlanStatus; createdAt: number; completedAt: number | null; steps: PlanStep[] }
 export interface FeedbackEntry { id: number; projectPath: string | null; providerId: string | null; rating: number | null; message: string; createdAt: number }
-export interface ProjectMeta { path: string; name: string; color: string; lastOpenedAt: number }
+export interface ProjectMeta {
+  path: string
+  name: string
+  color: string
+  iconPath: string | null
+  lastOpenedAt: number
+}
 
 /** User profile — multi-user поддержка команды агентства (14 человек). */
 export interface UserProfile {
@@ -89,7 +95,19 @@ declare global {
         setCurrent: (path: string | null) => Promise<void>
         list: () => Promise<ProjectMeta[]>
         rename: (path: string, name: string) => Promise<void>
+        updateMeta: (path: string, patch: { name?: string; iconPath?: string | null }) => Promise<ProjectMeta | null>
+        pickIcon: (path: string) => Promise<ProjectMeta | null>
+        clearIcon: (path: string) => Promise<ProjectMeta | null>
         remove: (path: string) => Promise<void>
+      }
+      app: {
+        getHomeDir: () => Promise<string>
+        getVersion: () => Promise<string>
+        isFocused: () => Promise<boolean>
+      }
+      notify: {
+        show: (opts: { title: string; body: string }) => Promise<boolean>
+        playSound: (opts?: { isError?: boolean }) => Promise<boolean>
       }
       files: {
         tree: (root: string) => Promise<FileNode[]>
@@ -102,6 +120,7 @@ declare global {
       settings: {
         getKey: (key: string) => Promise<string | null>
         setKey: (key: string, value: string) => Promise<void>
+        onUiScaleChanged?: (cb: (percent: number) => void) => () => void
       }
       providers: {
         list: () => Promise<ProviderDescriptorDTO[]>
@@ -125,6 +144,8 @@ declare global {
         resolveWrite: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         resolveCommand: (callId: string, accept: boolean, sendId?: number) => Promise<void>
         stop: (sendId: number) => Promise<boolean>
+        /** sendId с живым стримом в main process (activeAborts). */
+        activeSends: () => Promise<number[]>
         countTokens: (text: string, projectPath: string | null, historyMessages?: ChatMessage[]) => Promise<{ tokens: number; exact: boolean; providerId: string }>
         onEvent: (cb: (data: { id: number; event: ChatEvent; projectPath: string | null }) => void) => () => void
       }
@@ -268,6 +289,7 @@ declare global {
         onAvailable(cb: (data: { version: string }) => void): () => void
         onDownloaded(cb: (data: { version: string }) => void): () => void
         onProgress(cb: (data: { percent: number }) => void): () => void
+        onNotAvailable(cb: () => void): () => void
       }
       audit: {
         query(projectPath: string, opts?: { limit?: number; action?: string; since?: number }): Promise<AuditEntry[]>

@@ -305,11 +305,7 @@ const AgentsIcon = (
 // with its own list of chat sessions + create button).
 // NAV is built inside the component to use translations.
 
-interface SidebarProps {
-  onOpenSettings: () => void
-}
-
-export function Sidebar({ onOpenSettings }: SidebarProps) {
+export function Sidebar() {
   const { path, tree, setProject, activeView, setActiveView } = useProject()
   const provider = useProvider()
   const t = useT()
@@ -379,7 +375,7 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
           <span className={`gg-provider-dot ${provider.transport === 'CLI' ? 'cli' : ''}`} />
           <span>{provider.label} · {provider.transport}</span>
         </div>
-        <button className="gg-settings-trigger" onClick={onOpenSettings} title={t.settings.title}>⚙</button>
+
       </div>
     </aside>
   )

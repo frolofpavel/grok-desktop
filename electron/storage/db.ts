@@ -382,6 +382,16 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       // субом-родителем для дерева в панели Agents (sub_call_id ← sub_parent_call_id).
       if (!cols.includes('sub_parent_call_id')) db.exec('ALTER TABLE chat_sessions ADD COLUMN sub_parent_call_id TEXT')
     }
+  },
+  {
+    version: 15,
+    description: 'projects.icon_path — пользовательская иконка проекта (PNG в userData)',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('icon_path')) {
+        db.exec('ALTER TABLE projects ADD COLUMN icon_path TEXT')
+      }
+    }
   }
 ]
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type ClipboardEvent } from 'react'
 import { useProject } from '../store/projectStore'
+import { isActiveChatBusy } from '../store/streaming-guard'
 import { useProvider } from '../hooks/useProvider'
 import { estimateCost, costSeverity, costBreakdown } from '../lib/pricing'
 import { Markdown } from './Markdown'
@@ -17,6 +18,13 @@ import { useAgentMode } from '../hooks/useAgentMode'
 import type { Attachment, Suggestion } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { useT } from '../i18n'
+import { notifyResponseReady } from '../lib/response-notify'
+import { ProjectAvatar } from './ProjectAvatar'
+
+function chatLabel(chatId: number): string {
+  const title = useProject.getState().chatSessions.find(s => s.id === chatId)?.title
+  return title ? `Ответ готов — ${title}` : 'Ответ готов'
+}
 
 const MAX_BYTES_PER_FILE = 5 * 1024 * 1024  // 5 MB
 const MAX_ATTACHMENTS = 8
@@ -90,9 +98,10 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
   // Codex-style right-panel menu anchored to the top-right header button.
   const [panelMenuOpen, setPanelMenuOpen] = useState(false)
   const panelMenuRef = useRef<HTMLDivElement>(null)
-  const { messages, addMessage, updateLastAssistant, isStreaming, setStreaming, activity, preflights, subagentRuns, sessionUsage, path: activePath, chatSessions, activeChatId, effortLevel, setEffortLevel } = useProject()
+  const { messages, addMessage, updateLastAssistant, isStreaming, setStreaming, activity, preflights, subagentRuns, sessionUsage, path: activePath, projectList, chatSessions, activeChatId, effortLevel, setEffortLevel } = useProject()
   const { mode: agentMode, setMode: setAgentMode } = useAgentMode()
-  const projectName = activePath ? activePath.replace(/^.*[\\/]/, '') : null
+  const activeProjectMeta = activePath ? projectList.find(p => p.path === activePath) : undefined
+  const projectName = activeProjectMeta?.name ?? (activePath ? activePath.replace(/^.*[\\/]/, '') : null)
   const activeChatTitle = chatSessions.find(s => s.id === activeChatId)?.title ?? null
   const provider = useProvider()
   const [input, setInput] = useState('')
@@ -173,6 +182,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         // sendOwners leak fix: stream завершается → удаляем owner, иначе
         // мапа растёт при каждом переключении проекта во время активного
         // стрима в фоне.
+        if (event.type === 'done') {
+          void notifyResponseReady({ body: 'Ответ готов — фоновый проект' })
+        } else if (event.type === 'error') {
+          void notifyResponseReady({ body: 'Ошибка в фоновом проекте', isError: true })
+        }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
       }
@@ -180,6 +194,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       // chat snapshot so the user's stream survives chat-switching.
       if (owner?.kind === 'chat' && owner.chatId !== store.activeChatId) {
         store.applyEventToChat(owner.chatId, event as unknown as { type: string; [k: string]: unknown })
+        if (event.type === 'done') {
+          void notifyResponseReady({ body: chatLabel(owner.chatId) })
+        } else if (event.type === 'error') {
+          void notifyResponseReady({ body: `Ошибка — ${chatLabel(owner.chatId)}`, isError: true })
+        }
         if (event.type === 'done' || event.type === 'error') store.forgetSendOwner(id)
         return
       }
@@ -396,6 +415,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         }
         setStreaming(false)
         store.forgetSendOwner(id)
+        const chatTitle = store.activeChatId != null ? chatLabel(store.activeChatId) : 'Ответ готов'
+        void notifyResponseReady({ body: chatTitle })
       }
       else if (event.type === 'error') {
         // If a plan step was running, mark it failed
@@ -416,6 +437,8 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         }
         setStreaming(false)
         store.forgetSendOwner(id)
+        const errChat = store.activeChatId != null ? chatLabel(store.activeChatId) : 'Ошибка ответа'
+        void notifyResponseReady({ body: errChat, isError: true })
       }
     })
     return off
@@ -513,6 +536,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     void window.api.suggestions.get(activePath).then(setSuggestions).catch(() => setSuggestions([]))
   }, [activePath, activeChatId, messages.length])
 
+  // При открытии чата / смене сессии — сверка с main process.
+  useEffect(() => {
+    void useProject.getState().reconcileComposerState()
+  }, [activeChatId, activePath])
+
   function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
     const items = e.clipboardData?.items
     if (!items) return
@@ -577,26 +605,58 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
    * message list with a larger budget — the model picks up where it stopped.
    */
   async function continueWithMoreTurns() {
-    if (!exhausted || isStreaming) return
+    if (!exhausted) return
     const store = useProject.getState()
+    await store.reconcileComposerState()
+    if (store.isComposerBusy()) return
     const newBudget = Math.min(exhausted.maxBudget, exhausted.used + exhausted.suggestedAdd)
     setExhausted(null)
     addMessage({ role: 'assistant', content: '' })
-    setStreaming(true)
+    if (activeChatId != null) store.beginOutboundSend(activeChatId)
+    else setStreaming(true)
     // Send everything except the empty placeholder we just pushed
     const msgs = [...useProject.getState().messages].slice(0, -1)
-    const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget)
-    if (activeChatId != null) {
-      useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
+    try {
+      const sendId = await window.api.ai.sendWithBudget(msgs, store.path, newBudget)
+      if (activeChatId != null) {
+        useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
+      }
+    } catch {
+      useProject.getState().clearOutboundSend()
     }
+  }
+
+  async function ensureProjectForChat(): Promise<{ path: string; activeChatId: number } | null> {
+    const store = useProject.getState()
+    if (store.path && store.activeChatId != null) {
+      return { path: store.path, activeChatId: store.activeChatId }
+    }
+    try {
+      const last = await window.api.settings.getKey('last_project_path')
+      const home = await window.api.app.getHomeDir()
+      const target = (last && last.length > 0) ? last : home
+      await store.setProject(target)
+    } catch {
+      return null
+    }
+    const next = useProject.getState()
+    if (!next.path || next.activeChatId == null) return null
+    return { path: next.path, activeChatId: next.activeChatId }
   }
 
   async function send() {
     const text = input.trim()
     if (!text && attachments.length === 0) return
-    if (isStreaming) return
     const store = useProject.getState()
-    const path = store.path
+    await store.reconcileComposerState()
+    if (store.isComposerBusy()) return
+    const ctx = await ensureProjectForChat()
+    if (!ctx) {
+      flashWarning('Сначала открой папку проекта слева — без неё переписка не сохраняется.')
+      return
+    }
+    const path = ctx.path
+    const activeChatId = ctx.activeChatId
     const userAttachments = attachments
     store.clearActivity()
     setExhausted(null)  // new send wipes any pending continue state
@@ -630,8 +690,13 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       }
     }
     addMessage({ role: 'user', content: enrichedText, attachments: userAttachments })
-    const activeChatId = store.activeChatId
     if (path && activeChatId) {
+      const session = useProject.getState().chatSessions.find(s => s.id === activeChatId)
+      if (session && (session.title === 'Основной чат' || session.title === 'Новый чат') && text) {
+        const title = text.length > 48 ? text.slice(0, 48) + '…' : text
+        useProject.getState().patchChatSession(activeChatId, { title })
+        void window.api.chatSessions.rename(activeChatId, title).catch(() => {})
+      }
       // В БД сохраняем оригинальный text пользователя (без loader-контекста),
       // чтобы при reload UI не показывал жирный системный блок.
       await window.api.chats.append(activeChatId, path, 'user', summary)
@@ -641,7 +706,9 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
         userAttachments.length > 0 ? `Вложений: ${userAttachments.length} (${userAttachments.map(a => a.name).join(', ')})` : null)
     }
     addMessage({ role: 'assistant', content: '' })
-    setStreaming(true)
+    const chatIdForSend = store.activeChatId
+    if (chatIdForSend != null) store.beginOutboundSend(chatIdForSend)
+    else setStreaming(true)
     const allMessages = [...useProject.getState().messages].slice(0, -1)
     // Skill override: если активен скилл — system prompt берётся из его тела.
     // Provider/model берутся из скилла ТОЛЬКО если активный выбор пользователя
@@ -652,6 +719,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
       ? useSkillsStore.getState().skills.find(s => s.id === useSkillsStore.getState().activeSkillId)
       : null
     let sendId: number
+    try {
     if (activeSkill) {
       // Узнаём текущий provider пользователя — чтобы решить override или нет
       const currentProvider = await window.api.settings.getKey('provider')
@@ -691,22 +759,43 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
     if (activeChatId != null) {
       useProject.getState().registerSendOwner(sendId, { kind: 'chat', chatId: activeChatId })
     }
+    } catch {
+      useProject.getState().clearOutboundSend()
+    }
+  }
+
+  function resolveActiveSendId(): number | null {
+    const fromRef = currentSendIdRef.current
+    if (fromRef != null) return fromRef
+    const store = useProject.getState()
+    const chatId = store.activeChatId
+    if (chatId == null) return null
+    for (const [sendId, owner] of Object.entries(store.sendOwners)) {
+      if (owner.kind === 'chat' && owner.chatId === chatId) return Number(sendId)
+    }
+    return null
   }
 
   async function stop() {
-    const id = currentSendIdRef.current
-    if (id == null) return
+    const store = useProject.getState()
+    const id = resolveActiveSendId()
+    if (id == null) {
+      store.clearOutboundSend()
+      void store.reconcileComposerState()
+      return
+    }
     await window.api.ai.stop(id)
-    setStreaming(false)
-    // sendOwners cleanup: stop() = главное место где renderer знает, что
-    // больше событий по этому sendId не придёт. Без этого owner повисал бы
-    // в мапе, потому что done event на abort иногда теряется.
-    useProject.getState().forgetSendOwner(id)
+    store.forgetSendOwner(id)
+    store.clearOutboundSend()
     currentSendIdRef.current = null
+    void store.reconcileComposerState()
   }
 
   const hasMessages = messages.length > 0
-  const canSend = !isStreaming && (input.trim().length > 0 || attachments.length > 0)
+  const composerBusy = useProject(s =>
+    isActiveChatBusy(s.activeChatId, s.sendOwners, s.outboundChatId)
+  )
+  const canSend = !composerBusy && (input.trim().length > 0 || attachments.length > 0)
 
   return (
     <div
@@ -726,7 +815,11 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
 
       {projectName && (
         <div className="gg-chat-project-bar" title={activePath ?? ''}>
-          <span className="gg-chat-project-icon">📁</span>
+          {activeProjectMeta ? (
+            <ProjectAvatar project={activeProjectMeta} className="gg-chat-project-avatar" size={22} />
+          ) : (
+            <span className="gg-chat-project-icon">📁</span>
+          )}
           <span className="gg-chat-project-name">{projectName}</span>
           {activeChatTitle && (
             <>
@@ -789,7 +882,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
             <img src={iconUrl} alt="Grok Desktop" className="gg-chat-empty-mark-img" />
             <div className="gg-chat-empty-title">Готов к работе</div>
             <div className="gg-chat-empty-hint">
-              Открой проект слева и напиши задачу. Можно прикрепить файл, бросить скриншот через Ctrl+V или drag-and-drop.
+              Напиши задачу — откроется твоя домашняя папка и переписка сохранится в базу. Или выбери другую папку слева. Ctrl+V — скриншот, drag-and-drop — файлы.
             </div>
             <div className="gg-chat-empty-modes">
               <div className="gg-chat-empty-modes-title">5 режимов агента — переключаются цифрами 1-5</div>
@@ -1041,7 +1134,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
           </div>
         )}
         {warning && <div className="gg-composer-warning">{warning}</div>}
-        {exhausted && !isStreaming && (
+        {exhausted && !composerBusy && (
           <div className="gg-budget-bar">
             <span>⏸ Бюджет {exhausted.used} ходов исчерпан — задача не завершена.</span>
             <div className="gg-budget-actions">
@@ -1105,14 +1198,14 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
                 void stop()
               }
             }}
-            placeholder={isStreaming ? `${provider.label} ${t.chat.streamingPlaceholder}` : t.chat.placeholder}
+            placeholder={composerBusy ? `${provider.label} ${t.chat.streamingPlaceholder}` : t.chat.placeholder}
           />
           <div className="gg-composer-actions">
             <button
               type="button"
               className="gg-attach-btn"
               onClick={() => fileInputRef.current?.click()}
-              disabled={isStreaming}
+              disabled={composerBusy}
               title="Прикрепить файл"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1121,7 +1214,7 @@ export function Chat({ onOpenSettings, rightPanel, onSelectRightPanel, onOpenSid
               </svg>
             </button>
             <VoiceInput onTranscript={chunk => setInput(prev => prev + chunk)} />
-            {isStreaming ? (
+            {composerBusy ? (
               <button
                 className="gg-send-btn gg-stop-btn"
                 onClick={() => void stop()}

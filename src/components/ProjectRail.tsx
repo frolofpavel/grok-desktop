@@ -1,12 +1,34 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useProject } from '../store/projectStore'
 import type { ProjectMeta } from '../types/api'
 import iconUrl from '../assets/icon.png'
-import { ProjectSettings } from './ProjectSettings'
+import { ProjectAvatar } from './ProjectAvatar'
+import { SettingsGearIcon } from './SettingsGearIcon'
+import { useT } from '../i18n'
 
-function initial(name: string): string {
-  const trimmed = name.trim()
-  return trimmed ? trimmed.charAt(0).toUpperCase() : '·'
+const RAIL_EXPANDED_KEY = 'gg-rail-expanded'
+const RAIL_WIDTH_COLLAPSED = '56px'
+const RAIL_WIDTH_EXPANDED = '200px'
+
+function readRailExpanded(): boolean {
+  try {
+    return localStorage.getItem(RAIL_EXPANDED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function filterProjects(list: ProjectMeta[], query: string, activePath: string | null): ProjectMeta[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return list
+  const matches = list.filter(
+    p => p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)
+  )
+  if (activePath && !matches.some(p => p.path === activePath)) {
+    const active = list.find(p => p.path === activePath)
+    if (active) return [active, ...matches]
+  }
+  return matches
 }
 
 interface ProjectChipProps {
@@ -14,26 +36,27 @@ interface ProjectChipProps {
   active: boolean
   unread: boolean
   streaming: boolean
+  expanded: boolean
   onClick: () => void
   onSettings: () => void
 }
 
-function ProjectChip({ project, active, unread, streaming, onClick, onSettings }: ProjectChipProps) {
+function ProjectChip({ project, active, unread, streaming, expanded, onClick, onSettings }: ProjectChipProps) {
   const [hover, setHover] = useState(false)
   return (
     <div
-      className={`gg-rail-chip ${active ? 'is-active' : ''}`}
+      className={`gg-rail-chip ${active ? 'is-active' : ''} ${expanded ? 'is-expanded' : ''}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      title={`${project.name}\n${project.path}`}
+      title={expanded ? project.path : `${project.name}\n${project.path}`}
     >
       <button
         type="button"
-        className="gg-rail-square"
-        style={{ background: project.color }}
+        className="gg-rail-chip-btn"
         onClick={onClick}
       >
-        {initial(project.name)}
+        <ProjectAvatar project={project} />
+        {expanded && <span className="gg-rail-label">{project.name}</span>}
       </button>
       {(unread || streaming) && (
         <span
@@ -56,24 +79,59 @@ function ProjectChip({ project, active, unread, streaming, onClick, onSettings }
 interface ProjectRailProps {
   sidebarOpen: boolean
   onToggleSidebar: () => void
+  onOpenProjectSettings: (project: ProjectMeta) => void
+  onOpenAppSettings: () => void
 }
 
-export function ProjectRail({ sidebarOpen, onToggleSidebar }: ProjectRailProps) {
+export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSettings, onOpenAppSettings }: ProjectRailProps) {
+  const t = useT()
   const { path, projectList, sessions, setProject, refreshProjectList } = useProject()
   const [bootstrapped, setBootstrapped] = useState(false)
-  const [settingsProject, setSettingsProject] = useState<ProjectMeta | null>(null)
+  const [railExpanded, setRailExpanded] = useState(readRailExpanded)
+  const [projectQuery, setProjectQuery] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  const filteredProjects = useMemo(
+    () => filterProjects(projectList, projectQuery, path),
+    [projectList, projectQuery, path]
+  )
+  const showSearch = projectList.length >= 2
+  const hasActiveFilter = projectQuery.trim().length > 0
+
+  function openSearch() {
+    setRailExpanded(true)
+    window.setTimeout(() => searchRef.current?.focus(), 180)
+  }
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--gg-rail-w', railExpanded ? RAIL_WIDTH_EXPANDED : RAIL_WIDTH_COLLAPSED)
+    try {
+      localStorage.setItem(RAIL_EXPANDED_KEY, railExpanded ? '1' : '0')
+    } catch { /* ignore */ }
+  }, [railExpanded])
 
   useEffect(() => {
     void (async () => {
       await refreshProjectList()
-      const list = useProject.getState().projectList
-      if (!useProject.getState().path && list.length > 0) {
-        await setProject(list[0].path)
+      const state = useProject.getState()
+      if (!state.path) {
+        const list = state.projectList
+        const last = await window.api.settings.getKey('last_project_path')
+        const lastInList = last && list.some(p => p.path === last) ? last : null
+        if (lastInList) {
+          await setProject(lastInList)
+        } else if (list.length > 0) {
+          await setProject(list[0].path)
+        } else {
+          const home = await window.api.app.getHomeDir()
+          const fallback = (last && last.length > 0) ? last : home
+          if (fallback) await setProject(fallback)
+        }
       }
       setBootstrapped(true)
     })()
   }, [])
-  void bootstrapped  // keep eslint quiet — the flag prevents repeated auto-open
+  void bootstrapped
 
   async function addProject() {
     const picked = await window.api.projects.pick()
@@ -81,8 +139,7 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar }: ProjectRailProps) 
   }
 
   return (
-    <>
-      <div className="gg-rail">
+      <div className={`gg-rail ${railExpanded ? 'is-expanded' : ''}`}>
         <button
           type="button"
           className="gg-rail-home"
@@ -102,9 +159,63 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar }: ProjectRailProps) 
             <line x1="9" y1="4" x2="9" y2="20" />
           </svg>
         </button>
+        <button
+          type="button"
+          className={`gg-rail-expand ${railExpanded ? 'is-expanded' : ''}`}
+          onClick={() => setRailExpanded(v => !v)}
+          title={railExpanded ? 'Свернуть панель проектов' : 'Развернуть — показать названия'}
+          aria-expanded={railExpanded}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {railExpanded ? (
+              <polyline points="15 6 9 12 15 18" />
+            ) : (
+              <polyline points="9 6 15 12 9 18" />
+            )}
+          </svg>
+          {railExpanded && <span className="gg-rail-expand-label">Проекты</span>}
+        </button>
+        {!railExpanded && showSearch && (
+          <button
+            type="button"
+            className="gg-rail-search-btn"
+            onClick={openSearch}
+            title="Поиск по проектам"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="11" cy="11" r="7" />
+              <line x1="16.5" y1="16.5" x2="21" y2="21" />
+            </svg>
+          </button>
+        )}
         <div className="gg-rail-divider" />
+        {railExpanded && showSearch && (
+          <div className="gg-rail-search-wrap">
+            <input
+              ref={searchRef}
+              type="search"
+              className="gg-input gg-rail-search"
+              placeholder="Поиск проекта…"
+              value={projectQuery}
+              onChange={e => setProjectQuery(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') setProjectQuery('') }}
+              aria-label="Поиск по проектам"
+            />
+            {hasActiveFilter && (
+              <button
+                type="button"
+                className="gg-rail-search-clear"
+                onClick={() => setProjectQuery('')}
+                title="Очистить поиск"
+              >×</button>
+            )}
+          </div>
+        )}
         <div className="gg-rail-list">
-          {projectList.map(p => {
+          {filteredProjects.length === 0 && hasActiveFilter && (
+            <div className="gg-rail-empty">Ничего не найдено</div>
+          )}
+          {filteredProjects.map(p => {
             const session = sessions[p.path]
             return (
               <ProjectChip
@@ -113,8 +224,9 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar }: ProjectRailProps) 
                 active={path === p.path}
                 unread={!!session?.hasUnread}
                 streaming={!!session?.isStreaming}
+                expanded={railExpanded}
                 onClick={() => { if (path !== p.path) void setProject(p.path) }}
-                onSettings={() => setSettingsProject(p)}
+                onSettings={() => onOpenProjectSettings(p)}
               />
             )
           })}
@@ -123,16 +235,22 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar }: ProjectRailProps) 
             className="gg-rail-add"
             onClick={() => void addProject()}
             title="Открыть проект"
-          >+</button>
+          >
+            {railExpanded ? <span className="gg-rail-add-label">+ Открыть</span> : '+'}
+          </button>
+        </div>
+        <div className="gg-rail-footer">
+          <button
+            type="button"
+            className="gg-rail-app-settings"
+            onClick={onOpenAppSettings}
+            title={t.settings.title}
+            aria-label={t.settings.title}
+          >
+            <SettingsGearIcon size={18} />
+            {railExpanded && <span className="gg-rail-app-settings-label">{t.settings.title}</span>}
+          </button>
         </div>
       </div>
-
-      {settingsProject && (
-        <ProjectSettings
-          project={settingsProject}
-          onClose={() => setSettingsProject(null)}
-        />
-      )}
-    </>
   )
 }

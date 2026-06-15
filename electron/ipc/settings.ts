@@ -1,5 +1,10 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import type { Settings } from '../storage/settings'
+import {
+  UI_SCALE_KEY,
+  applyUiScaleToWindow,
+  normalizeUiScalePercent
+} from '../ui-scale'
 import { detectInstalledClis } from '../ai/cli-detect'
 import { PROVIDERS } from '../ai/registry'
 import { runDoctor } from '../ai/doctor'
@@ -61,8 +66,16 @@ function buildPolicyMatrix(): PolicyMatrixDTO {
 
 export function registerSettingsIpc(settings: Settings): void {
   ipcMain.handle('settings:get-key', (_e, key: string) => settings.getSecret(key))
-  ipcMain.handle('settings:set-key', (_e, key: string, value: string) => {
+  ipcMain.handle('settings:set-key', (e, key: string, value: string) => {
     settings.setSecret(key, value)
+    if (key === UI_SCALE_KEY) {
+      const win = BrowserWindow.fromWebContents(e.sender)
+      if (win) {
+        const pct = normalizeUiScalePercent(value)
+        applyUiScaleToWindow(win, pct)
+        win.webContents.send('ui-scale:changed', pct)
+      }
+    }
   })
   ipcMain.handle('cli:detect', () => detectInstalledClis())
 

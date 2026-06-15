@@ -30,8 +30,9 @@ describe('buildCliPrompt — бюджет argv-cap (grok-cli)', () => {
     expect(payload.length).toBeLessThanOrEqual(8000)
     // Сам вопрос обязан быть в payload (раньше срезался с конца).
     expect(payload).toContain('АПИ у тебя подключены какие-то? Проверь')
-    // И он в самом конце (это «prompt» для CLI).
-    expect(payload.trimEnd().endsWith('АПИ у тебя подключены какие-то? Проверь')).toBe(true)
+    // И он в самом конце внутри явного current-user блока (это «prompt» для CLI).
+    expect(payload).toContain('<current_user_request>')
+    expect(payload.trimEnd().endsWith('</current_user_request>')).toBe(true)
   })
 
   it('без maxChars payload содержит и историю, и вопрос', async () => {

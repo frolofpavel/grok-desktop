@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { I18nContext, getTranslations, type Lang } from './i18n'
 import { AuthScreen } from './components/AuthScreen'
 import { ProjectRail } from './components/ProjectRail'
+import { ProjectSettings } from './components/ProjectSettings'
+import type { ProjectMeta } from './types/api'
 import { Sidebar } from './components/Sidebar'
 import { Settings } from './components/Settings'
 import { Chat } from './components/Chat'
@@ -36,6 +38,7 @@ const SIDEBAR_WIDTH_KEY = 'gg.sidebarWidth'
 
 export function App() {
   const [showSettings, setShowSettings] = useState(false)
+  const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectMeta | null>(null)
   // Right docked panel: one of terminal / files / sidechat / none (Codex-style selector).
   const [rightPanel, setRightPanel] = useState<'none' | 'terminal' | 'files' | 'sidechat'>('none')
   // Lazily-created dedicated side-chat session id. Created on first open of the
@@ -96,7 +99,7 @@ export function App() {
     return stored >= SIDEBAR_MIN && stored <= SIDEBAR_MAX ? stored : SIDEBAR_DEFAULT
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
-  const { path, activeView, setActiveView, isStreaming, setStreaming, clearPendingWrites, setPendingCommand } = useProject()
+  const { path, activeView, setActiveView, clearPendingWrites, setPendingCommand } = useProject()
   // Panels require an open project (the terminal/file tree are project-scoped).
   const effectiveRightPanel = path ? rightPanel : 'none'
 
@@ -144,14 +147,31 @@ export function App() {
         // the UI never sticks in a stuck-streaming state.
         e.preventDefault()
         void window.api.ai.stop(0).catch(() => {})
-        setStreaming(false)
+        useProject.setState({ outboundChatId: null, sendOwners: {}, isStreaming: false })
         clearPendingWrites()
         setPendingCommand(null)
+        void useProject.getState().reconcileComposerState()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isStreaming, setStreaming, clearPendingWrites, setPendingCommand])
+  }, [clearPendingWrites, setPendingCommand])
+
+  // Watchdog: сверка isStreaming с main process — снимает залипший ввод композера.
+  useEffect(() => {
+    void useProject.getState().reconcileComposerState()
+    const timer = window.setInterval(() => {
+      if (useProject.getState().activeView === 'chat') {
+        void useProject.getState().reconcileComposerState()
+      }
+    }, 2500)
+    function onFocus() { void useProject.getState().reconcileComposerState() }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
 
   // Mouse-drag resize handle on the sidebar's right edge.
   function startDrag(e: React.MouseEvent) {
@@ -202,10 +222,12 @@ export function App() {
       <ProjectRail
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(v => !v)}
+        onOpenProjectSettings={setProjectSettingsTarget}
+        onOpenAppSettings={() => setShowSettings(true)}
       />
       {sidebarOpen && (
         <>
-          <Sidebar onOpenSettings={() => setShowSettings(true)} />
+          <Sidebar />
           <div
             className="gg-sidebar-resize"
             onMouseDown={startDrag}
@@ -282,6 +304,13 @@ export function App() {
         )}
       </main>
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+      {projectSettingsTarget && (
+        <ProjectSettings
+          project={projectSettingsTarget}
+          onClose={() => setProjectSettingsTarget(null)}
+          onProjectUpdated={setProjectSettingsTarget}
+        />
+      )}
       {showOnboarding && <OnboardingWizard onComplete={() => setShowOnboarding(false)} />}
       <ArtifactPreviewContainer />
       <TerminalErrorToast />
