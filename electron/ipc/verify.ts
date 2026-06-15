@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { classifyCommand } from '../ai/command-policy'
+import { scanText } from '../ai/secret-scanner'
 
 const execFileAsync = promisify(execFile)
 
@@ -32,14 +33,20 @@ export function registerVerifyIpc(getProjectRoot: () => string | null): void {
       const { stdout, stderr } = await execFileAsync(shell, shellArgs, {
         cwd, timeout: 120_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true
       })
-      return { exitCode: 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }
+      // Редактируем вывод через secret-scanner — verify-команды печатают логи,
+      // в которых могут оказаться токены/ключи.
+      return {
+        exitCode: 0,
+        stdout: scanText(String(stdout ?? '')).redacted,
+        stderr: scanText(String(stderr ?? '')).redacted
+      }
     } catch (err) {
       const e = err as { stdout?: string; stderr?: string; code?: number; message?: string }
       const exitCode = typeof e.code === 'number' ? e.code : 1
       return {
         exitCode,
-        stdout: String(e.stdout ?? ''),
-        stderr: String(e.stderr ?? e.message ?? '')
+        stdout: scanText(String(e.stdout ?? '')).redacted,
+        stderr: scanText(String(e.stderr ?? e.message ?? '')).redacted
       }
     }
   })

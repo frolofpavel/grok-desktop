@@ -95,7 +95,7 @@ declare global {
         setCurrent: (path: string | null) => Promise<void>
         list: () => Promise<ProjectMeta[]>
         rename: (path: string, name: string) => Promise<void>
-        updateMeta: (path: string, patch: { name?: string; iconPath?: string | null }) => Promise<ProjectMeta | null>
+        updateMeta: (path: string, patch: { name?: string }) => Promise<ProjectMeta | null>
         pickIcon: (path: string) => Promise<ProjectMeta | null>
         clearIcon: (path: string) => Promise<ProjectMeta | null>
         remove: (path: string) => Promise<void>

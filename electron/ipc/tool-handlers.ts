@@ -34,6 +34,7 @@ import { decide, blockReason, type AgentMode } from '../ai/mode-policy'
 import { classifyMcpToolScope, mcpDecision, mcpBlockReason } from '../ai/mcp-policy'
 import { getRolePrompt } from '../ai/agent-roles'
 import { invalidateProjectMap, markFileDirty } from '../ai/project-map'
+import { scanText } from '../ai/secret-scanner'
 import type { McpClient } from '../mcp/client'
 import type { ProviderId } from '../ai/registry'
 
@@ -301,6 +302,13 @@ const applyPatchHandler: ToolHandler = {
   async handle(call, ctx) {
     const path = String(call.args.path)
     const before = await readBeforeContent(ctx, path)
+    // Anti-redacted-writeback: read_file отдаёт модели [REDACTED:...] вместо
+    // реальных секретов. Если модель строит патч поверх такого «before», она
+    // перепишет реальные значения плейсхолдерами. Блокируем — пусть правит
+    // файл вручную вне приложения.
+    if (before.includes('[REDACTED:')) {
+      return { id: call.id, name: call.name, result: '', error: 'apply_patch заблокирован: файл содержит секреты, скрытые secret-scanner ([REDACTED:...]). Патч переписал бы плейсхолдеры поверх реальных значений. Отредактируй файл вручную вне приложения.' }
+    }
     const anchorHash = call.args.anchor_hash ? String(call.args.anchor_hash) : undefined
     let after: string
     try {
@@ -404,11 +412,16 @@ const runCommandHandler: ToolHandler = {
     }
     try {
       const result = await ctx.tools.runCommand(command)
+      // Редактируем оба потока через secret-scanner ДО отправки в UI и
+      // возврата модели — иначе ключи/токены из stdout/stderr утекают в
+      // контекст и в Timeline.
+      const stdout = scanText(result.stdout).redacted
+      const stderr = scanText(result.stderr).redacted
       ctx.sender.send('ai:event', {
         id: ctx.sendId,
-        event: { type: 'command-result', callId: call.id, command, status: 'ok', exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr }
+        event: { type: 'command-result', callId: call.id, command, status: 'ok', exitCode: result.exitCode, stdout, stderr }
       })
-      return { id: call.id, name: call.name, result }
+      return { id: call.id, name: call.name, result: { stdout, stderr, exitCode: result.exitCode } }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       ctx.sender.send('ai:event', {
@@ -2456,11 +2469,14 @@ const mcpToolHandler: ToolHandler = {
     try {
       emitActivity(ctx, call, 'ok', `mcp:${call.name}`, matchedTool.serverId)
       const result = await ctx.mcpClient.callTool(matchedTool.serverId, call.name, call.args)
-      return { id: call.id, name: call.name, result: typeof result === 'string' ? result : JSON.stringify(result) }
+      // Редактируем вывод внешнего MCP-сервера — он не доверенный, может вернуть
+      // токены/ключи, которые иначе утекут в контекст модели.
+      const raw = typeof result === 'string' ? result : JSON.stringify(result)
+      return { id: call.id, name: call.name, result: scanText(raw).redacted }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      emitActivity(ctx, call, 'error', `mcp:${call.name}`, msg)
-      return { id: call.id, name: call.name, result: '', error: msg }
+      emitActivity(ctx, call, 'error', `mcp:${call.name}`, scanText(msg).redacted)
+      return { id: call.id, name: call.name, result: '', error: scanText(msg).redacted }
     }
   }
 }

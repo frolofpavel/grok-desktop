@@ -72,4 +72,24 @@ describe('scanText', () => {
     expect(redacted).toBe(code)
     expect(hits).toEqual([])
   })
+
+  // Контракт run_command / verify:exec / MCP-вывода: оба потока команды
+  // пропускаются через scanText.redacted перед отправкой в UI и модели.
+  // Многострочный дамп с несколькими типами секретов — всё должно быть скрыто.
+  it('redacts a realistic multi-line command stdout dump', () => {
+    const stdout = [
+      'Loading env...',
+      'GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+      'export AWS_KEY=AKIAIOSFODNN7EXAMPLE',
+      'done.'
+    ].join('\n')
+    const { redacted, hits } = scanText(stdout)
+    expect(redacted).toContain('[REDACTED:github-token]')
+    expect(redacted).toContain('[REDACTED:aws-access-key]')
+    expect(redacted).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789')
+    expect(redacted).not.toContain('AKIAIOSFODNN7EXAMPLE')
+    expect(redacted).toContain('Loading env...') // обычный текст сохранён
+    expect(hits).toContain('github-token')
+    expect(hits).toContain('aws-access-key')
+  })
 })

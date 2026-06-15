@@ -39,6 +39,18 @@ describe('readSpreadsheet', () => {
   it('блокирует выход за пределы проекта', async () => {
     await expect(readSpreadsheet(projectPath, '../secret.xlsx')).rejects.toThrow()
   })
+
+  it('редактирует секрет в ячейке через secret-scanner', async () => {
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Ключи')
+    ws.addRow(['Сервис', 'Токен'])
+    ws.addRow(['GitHub', 'ghp_abcdefghijklmnopqrstuvwxyz0123456789'])
+    await wb.xlsx.writeFile(join(projectPath, 'keys.xlsx'))
+    const text = await readSpreadsheet(projectPath, 'keys.xlsx')
+    expect(text).toContain('[REDACTED:github-token]')
+    expect(text).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789')
+    expect(text).toContain('secret-scanner: redacted')
+  })
 })
 
 describe('editSpreadsheet', () => {

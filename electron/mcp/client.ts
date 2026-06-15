@@ -48,6 +48,32 @@ interface McpConnection {
 const TOOL_CALL_TIMEOUT_MS = 30_000
 const INIT_TIMEOUT_MS = 15_000
 
+/**
+ * Allowlist переменных окружения, которые прокидываем в дочерний MCP-процесс.
+ * Раньше мы лили весь process.env (включая API-ключи провайдеров, OAuth-токены,
+ * креды коннекторов) в произвольный сторонний сервер — это утечка. Прокидываем
+ * только то, что нужно процессу запуститься (PATH, временные папки, локаль),
+ * а конкретные секреты сервер получает явно через config.env.
+ */
+const MCP_ENV_ALLOWLIST = [
+  'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'SystemDrive', 'windir',
+  'TEMP', 'TMP', 'ComSpec',
+  'APPDATA', 'LOCALAPPDATA', 'PROGRAMFILES', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramData',
+  'USERPROFILE', 'HOME', 'HOMEDRIVE', 'HOMEPATH',
+  'LANG', 'LC_ALL', 'TZ',
+  'NODE_OPTIONS', 'NPM_CONFIG_PREFIX'
+]
+
+/** Собрать env для дочернего MCP-процесса: allowlisted process.env + config.env сверху. */
+function buildMcpEnv(configEnv?: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const key of MCP_ENV_ALLOWLIST) {
+    const v = process.env[key]
+    if (v != null) env[key] = v
+  }
+  return { ...env, ...(configEnv ?? {}) }
+}
+
 export class McpClient extends EventEmitter {
   private connections: Map<string, McpConnection> = new Map()
 
@@ -62,7 +88,7 @@ export class McpClient extends EventEmitter {
     }
 
     const child = spawn(config.command, config.args, {
-      env: { ...process.env, ...(config.env ?? {}) },
+      env: buildMcpEnv(config.env),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
     })

@@ -1,7 +1,7 @@
 import { ipcMain, shell } from 'electron'
 import { readdir, stat, readFile } from 'fs/promises'
 import { join } from 'path'
-import { safeRealJoin } from '../ai/path-policy'
+import { safeRealJoin, isWithinKnownRoots } from '../ai/path-policy'
 import { isForbiddenPath, scanText } from '../ai/secret-scanner'
 import type { FileNode } from '../shared-types'
 
@@ -36,11 +36,16 @@ async function listTree(current: string, depth: number): Promise<FileNode[]> {
 
 export interface FilesIpcDeps {
   getProjectRoot: () => string | null
+  getKnownRoots: () => string[]
 }
 
 export function registerFilesIpc(deps: FilesIpcDeps): void {
   ipcMain.handle('files:tree', async (_e, root: string) => {
-    // listTree is bounded by the root itself + IGNORE list + depth — already safe.
+    // listTree ограничен root + IGNORE + depth, но сам root приходит из renderer —
+    // обходим только зарегистрированные проекты, иначе можно листить любой диск.
+    if (!isWithinKnownRoots(root, deps.getKnownRoots())) {
+      throw new Error('Доступ запрещён: вне зарегистрированных проектов')
+    }
     return listTree(root, 0)
   })
 
@@ -50,6 +55,11 @@ export function registerFilesIpc(deps: FilesIpcDeps): void {
    * electron.shell.openPath — это безопасный встроенный API, не shell exec.
    */
   ipcMain.handle('files:reveal', async (_e, path: string) => {
+    // Открываем в проводнике только пути внутри зарегистрированных проектов —
+    // иначе renderer мог бы открыть произвольную системную папку.
+    if (!isWithinKnownRoots(path, deps.getKnownRoots())) {
+      throw new Error('Доступ запрещён: вне зарегистрированных проектов')
+    }
     // shell.openPath возвращает '' при успехе, или текст ошибки.
     const err = await shell.openPath(path)
     return { ok: err === '', error: err || null }
@@ -62,11 +72,23 @@ export function registerFilesIpc(deps: FilesIpcDeps): void {
    */
   ipcMain.handle('files:docx-to-html', async (_e, path: string) => {
     try {
+      // Root-guard: конвертируем только docx внутри зарегистрированных проектов.
+      if (!isWithinKnownRoots(path, deps.getKnownRoots())) {
+        throw new Error('Доступ запрещён: вне зарегистрированных проектов')
+      }
+      // isForbiddenPath по относительному пути от объемлющего проекта — не даём
+      // вытащить содержимое секретного файла под видом docx.
+      const root = deps.getProjectRoot()
+      const relPath = root && path.startsWith(root) ? path.slice(root.length).replace(/^[\\/]+/, '') : path
+      if (isForbiddenPath(relPath)) {
+        throw new Error(`Доступ запрещён политикой безопасности: ${relPath} (secrets/credentials)`)
+      }
       const mammoth = await import('mammoth')
       const result = await mammoth.convertToHtml({ path })
       return {
         ok: true,
-        html: result.value,
+        // Прогоняем HTML через secret-scanner — содержимое документа не доверяем.
+        html: scanText(result.value).redacted,
         warnings: result.messages.slice(0, 10).map(m => `${m.type}: ${m.message}`)
       }
     } catch (err) {

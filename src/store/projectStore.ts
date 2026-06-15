@@ -139,7 +139,7 @@ interface ProjectState {
   setProject: (path: string) => Promise<void>
   closeProject: () => void
   refreshProjectList: () => Promise<void>
-  updateProjectMeta: (path: string, patch: { name?: string; iconPath?: string | null }) => Promise<ProjectMeta | null>
+  updateProjectMeta: (path: string, patch: { name?: string }) => Promise<ProjectMeta | null>
   removeProject: (path: string) => Promise<void>
   setActiveView: (v: ViewId) => void
   addMessage: (msg: ChatMessage) => void

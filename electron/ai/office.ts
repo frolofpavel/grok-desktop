@@ -9,7 +9,7 @@
  * exceljs — для xlsx (read/modify/write). mammoth — для docx→текст (уже в deps).
  */
 
-import { isForbiddenPath } from './secret-scanner'
+import { isForbiddenPath, scanText } from './secret-scanner'
 import { safeRealJoin } from './path-policy'
 
 // Лимиты вывода, чтобы большие листы не разносили контекст модели.
@@ -85,7 +85,12 @@ export async function readSpreadsheet(projectPath: string, relPath: string): Pro
   })
 
   if (out.length === 0) return '(в книге нет листов)'
-  return out.join('\n')
+  // Редактируем вывод через secret-scanner — в ячейках клиентских таблиц могут
+  // лежать токены/ключи, которые иначе утекут в контекст модели.
+  const scan = scanText(out.join('\n'))
+  return scan.hits.length > 0
+    ? `[secret-scanner: redacted ${scan.hits.join(', ')}]\n${scan.redacted}`
+    : scan.redacted
 }
 
 /**
@@ -101,8 +106,13 @@ export async function readDocument(projectPath: string, relPath: string): Promis
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mammoth = require('mammoth') as { extractRawText: (opts: { path: string }) => Promise<{ value: string }> }
   const res = await mammoth.extractRawText({ path: abs })
-  const text = res.value ?? ''
-  return text.length > MAX_DOC_CHARS ? text.slice(0, MAX_DOC_CHARS) + '\n…(документ обрезан)' : text
+  const raw = res.value ?? ''
+  const text = raw.length > MAX_DOC_CHARS ? raw.slice(0, MAX_DOC_CHARS) + '\n…(документ обрезан)' : raw
+  // Редактируем содержимое документа через secret-scanner перед отдачей модели.
+  const scan = scanText(text)
+  return scan.hits.length > 0
+    ? `[secret-scanner: redacted ${scan.hits.join(', ')}]\n${scan.redacted}`
+    : scan.redacted
 }
 
 export interface CellEdit { cell: string; value: string }

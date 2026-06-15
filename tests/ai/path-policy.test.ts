@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { safeJoin } from '../../electron/ai/path-policy'
+import { join } from 'path'
+import { safeJoin, isWithinKnownRoots } from '../../electron/ai/path-policy'
 
 const WIN = process.platform === 'win32'
 const ROOT = WIN ? 'C:\\Users\\Pavel\\proj' : '/home/pavel/proj'
@@ -27,5 +28,36 @@ describe('path-policy safeJoin', () => {
   it('блокирует абсолютный путь наружу', () => {
     const outside = WIN ? 'C:\\Windows\\System32' : '/etc/passwd'
     expect(() => safeJoin(ROOT, outside)).toThrow()
+  })
+})
+
+describe('path-policy isWithinKnownRoots', () => {
+  it('true для пути внутри известного корня', () => {
+    expect(isWithinKnownRoots(join(ROOT, 'src', 'foo.ts'), [ROOT])).toBe(true)
+  })
+
+  it('true для самого корня', () => {
+    expect(isWithinKnownRoots(ROOT, [ROOT])).toBe(true)
+  })
+
+  it('false для пути вне всех корней', () => {
+    const outside = WIN ? 'C:\\Windows\\System32' : '/etc'
+    expect(isWithinKnownRoots(outside, [ROOT])).toBe(false)
+  })
+
+  it('false когда корней нет', () => {
+    expect(isWithinKnownRoots(ROOT, [])).toBe(false)
+  })
+
+  it('false для .. traversal из корня', () => {
+    expect(isWithinKnownRoots(join(ROOT, '..', 'secret'), [ROOT])).toBe(false)
+  })
+
+  it.runIf(WIN)('false для другого диска (drive bypass)', () => {
+    expect(isWithinKnownRoots('D:\\Secret', ['C:\\Users\\Pavel\\proj'])).toBe(false)
+  })
+
+  it('игнорирует пустые корни в списке', () => {
+    expect(isWithinKnownRoots(join(ROOT, 'a.ts'), ['', ROOT])).toBe(true)
   })
 })

@@ -1,12 +1,24 @@
 import { app, nativeImage } from 'electron'
 import { createHash } from 'crypto'
 import { mkdirSync, writeFileSync, unlinkSync, existsSync } from 'fs'
-import { join } from 'path'
+import { join, resolve, relative, isAbsolute, sep } from 'path'
 
 export function projectIconsDir(): string {
   const dir = join(app.getPath('userData'), 'project-icons')
   mkdirSync(dir, { recursive: true })
   return dir
+}
+
+/**
+ * True, если путь лежит ВНУТРИ папки project-icons (userData/project-icons).
+ * Защита от чтения/удаления произвольного файла: filePath/iconPath приходят
+ * снаружи (protocol-хендлер, БД), и без этой проверки агент/renderer мог бы
+ * подсунуть любой системный путь.
+ */
+export function isInsideProjectIcons(p: string): boolean {
+  if (!p) return false
+  const r = relative(resolve(projectIconsDir()), resolve(p))
+  return r !== '' && !r.startsWith('..') && !r.includes('..' + sep) && !isAbsolute(r)
 }
 
 function iconDestPath(projectPath: string): string {
@@ -29,6 +41,9 @@ export function importProjectIcon(projectPath: string, sourcePath: string): stri
 }
 
 export function deleteProjectIconFile(iconPath: string | null | undefined): void {
-  if (!iconPath || !existsSync(iconPath)) return
+  // Удаляем только файлы внутри project-icons — защита от unlink произвольного
+  // пути, если iconPath окажется подделан.
+  if (!iconPath || !isInsideProjectIcons(iconPath)) return
+  if (!existsSync(iconPath)) return
   try { unlinkSync(iconPath) } catch { /* ignore */ }
 }
