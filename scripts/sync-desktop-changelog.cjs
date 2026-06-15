@@ -235,7 +235,7 @@ async function main() {
       spacing: { after: 200 }
     }),
     body(`Обновлено: ${new Date().toLocaleString('ru-RU')}`),
-    body('Версия в package.json: 0.1.0'),
+    body('Версия в package.json: 0.1.1'),
     body('Исходники: локальная рабочая копия grok-desktop'),
     body('Установка: %LOCALAPPDATA%\\Programs\\Grok Desktop'),
     body('Правило: после каждого изменения/деплоя агент дописывает запись и перегенерирует этот файл (node scripts/sync-desktop-changelog.cjs).'),

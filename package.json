@@ -1,6 +1,6 @@
 {
   "name": "grok-desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Desktop AI coding agent for Grok (xAI) and Grok Build. Local-first, secure, skills-first.",
   "main": "out/main/main.mjs",
   "scripts": {
