@@ -1,7 +1,27 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
+import { existsSync, statSync } from 'fs'
+import { homedir } from 'os'
+import { resolve, relative, isAbsolute, sep } from 'path'
 
 const sessions = new Map<number, pty.IPty>()
+
+/** Безопасный cwd для терминала: если запрошенный путь существует И лежит
+ *  внутри одного из известных корней проектов — используем его; иначе
+ *  откатываемся в домашнюю папку (не спавним в произвольной системной директории). */
+export function resolveSafeTerminalCwd(requested: string | undefined, knownRoots: string[], home: string = homedir()): string {
+  if (!requested) return home
+  let abs: string
+  try { abs = resolve(requested) } catch { return home }
+  try { if (!existsSync(abs) || !statSync(abs).isDirectory()) return home } catch { return home }
+  for (const root of knownRoots) {
+    if (!root) continue
+    const r = relative(resolve(root), abs)
+    // внутри корня: r не начинается с .. и не абсолютный (anti drive-bypass)
+    if (r === '' || (!r.startsWith('..') && !r.includes('..' + sep) && !isAbsolute(r))) return abs
+  }
+  return home
+}
 
 /**
  * Per-session buffer для error detection. Накапливаем последние ~4KB stdout
@@ -47,10 +67,11 @@ function detectErrorInBuffer(buf: string): DetectedError | null {
   return null
 }
 
-export function registerTerminalIpc(): void {
+export function registerTerminalIpc(getKnownRoots: () => string[] = () => []): void {
   ipcMain.handle('term:spawn', (e, cwd: string) => {
     const win = BrowserWindow.fromWebContents(e.sender)
     if (!win) return -1
+    const safeCwd = resolveSafeTerminalCwd(cwd, getKnownRoots())
     const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash'
     const env = {
       ...(process.env as Record<string, string>),
@@ -69,7 +90,7 @@ export function registerTerminalIpc(): void {
           "[Console]::InputEncoding=[System.Text.UTF8Encoding]::new(); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $OutputEncoding=[System.Text.UTF8Encoding]::new(); chcp 65001 > $null"
         ]
       : []
-    const p = pty.spawn(shell, args, { cwd, cols: 100, rows: 30, env })
+    const p = pty.spawn(shell, args, { cwd: safeCwd, cols: 100, rows: 30, env })
     const id = p.pid
     sessions.set(id, p)
     errBuffers.set(id, '')

@@ -49,6 +49,17 @@ describe('scanText', () => {
     const { redacted, hits } = scanText(pem)
     expect(redacted).toContain('[REDACTED:private-key-block]')
     expect(hits).toContain('private-key-block')
+    expect(redacted).not.toContain('MIIEowIBAA==') // тело ключа не утекло
+  })
+
+  it('redacts a private key whose -----END----- is missing (truncated dump)', () => {
+    // Частичная утечка: вывод обрезан до END — тело всё равно должно быть скрыто
+    const partial = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA...\nAAAAB3Nza...'
+    const { redacted, hits } = scanText(partial)
+    expect(redacted).toContain('[REDACTED:private-key-block]')
+    expect(hits).toContain('private-key-block')
+    expect(redacted).not.toContain('b3BlbnNzaC1rZXktdjEAAAA') // тело ключа не утекло
+    expect(redacted).not.toContain('AAAAB3Nza')
   })
   it('redacts basic-auth in URLs', () => {
     const { redacted, hits } = scanText('connect: https://admin:p4ss@1c.example.com/odata')

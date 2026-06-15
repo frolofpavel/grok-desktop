@@ -370,7 +370,14 @@ app.whenReady().then(() => {
     },
     getActiveProject: () => getActiveProjectPath()
   })
-  registerTerminalIpc()
+  // getKnownRoots — корни проектов пользователя для валидации cwd терминала
+  // (см. resolveSafeTerminalCwd). Берём сохранённые проекты + активный путь.
+  registerTerminalIpc(() => {
+    const roots = projects.list().map(p => p.path)
+    const active = getActiveProjectPath()
+    if (active && !roots.includes(active)) roots.push(active)
+    return roots
+  })
   registerSkillsIpc(skillRegistry, { getSecret })
   registerUserProfilesIpc(userProfiles)
   registerMemoryIpc(db)

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { classifyCommand } from '../../electron/ai/command-policy'
+import { classifyCommand, isVerifierCommand } from '../../electron/ai/command-policy'
 
 describe('classifyCommand', () => {
   it('allows normal dev commands', () => {
@@ -97,5 +97,34 @@ describe('classifyCommand', () => {
   it('blocks Invoke-Expression / iex', () => {
     expect(classifyCommand('iex (Get-Content payload.txt)').allowed).toBe(false)
     expect(classifyCommand('Invoke-Expression $cmd').allowed).toBe(false)
+  })
+
+  // Security hardening: обход денилиста через маски/кавычки/backticks/base64
+  it('blocks key-reading via glob masks (.ss*, id_*)', () => {
+    expect(classifyCommand('cat ~/.ss*/id_*').allowed).toBe(false)
+    expect(classifyCommand('cat ~/.ssh/id_rsa').allowed).toBe(false)
+  })
+
+  it('blocks key-reading hidden behind quotes / backticks (deobfuscation)', () => {
+    expect(classifyCommand("c'a't ~/.ss'h'/id_r's'a").allowed).toBe(false)
+    expect(classifyCommand('Get-Content "$Home\\.ss`h\\id_rs`a"').allowed).toBe(false)
+  })
+
+  it('blocks base64-decode piped into a shell', () => {
+    expect(classifyCommand('echo Y2F0 | base64 -d | sh').allowed).toBe(false)
+    expect(classifyCommand('base64 --decode payload.b64 | bash').allowed).toBe(false)
+  })
+
+  it('still allows ordinary dev commands (no false positives)', () => {
+    expect(classifyCommand('npm test').allowed).toBe(true)
+    expect(classifyCommand('git status').allowed).toBe(true)
+    expect(classifyCommand('npm run build').allowed).toBe(true)
+    expect(classifyCommand('node script.js').allowed).toBe(true)
+    expect(classifyCommand('ls -la src').allowed).toBe(true)
+  })
+
+  it('isVerifierCommand: verifier allowlist intact', () => {
+    expect(isVerifierCommand('npm run type')).toBe(true)
+    expect(isVerifierCommand('rm -rf /')).toBe(false)
   })
 })
