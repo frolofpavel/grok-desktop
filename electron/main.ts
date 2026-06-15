@@ -67,13 +67,19 @@ import { trackToolForPatterns } from './ai/procedural-memory'
 import { registerSuggestionsIpc } from './ipc/suggestions'
 import { initAutoUpdater } from './updater'
 import { registerNotifyIpc } from './ipc/notify'
+import {
+  mainWindowConstructorOptions,
+  readMainWindowState,
+  trackMainWindowState
+} from './window-state'
+import type { Settings } from './storage/settings'
 
-function createWindow(): BrowserWindow {
+function createWindow(settings: Settings): BrowserWindow {
   // HERE = out/main in dev and prod
   const iconPath = join(HERE, '../../resources/icon.png')
+  const windowState = readMainWindowState(settings)
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    ...mainWindowConstructorOptions(windowState),
     title: 'Grok Desktop',
     icon: iconPath,
     webPreferences: {
@@ -91,6 +97,8 @@ function createWindow(): BrowserWindow {
       webviewTag: true  // Allow <webview> for the in-app browser
     }
   })
+
+  trackMainWindowState(win, settings, windowState)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -371,7 +379,7 @@ app.whenReady().then(() => {
   registerAuditIpc(db)
   registerDebugIpc(db, chats)
   registerSuggestionsIpc(db)
-  const mainWindow = createWindow()
+  const mainWindow = createWindow(settings)
   const iconPath = join(HERE, '../../resources/icon.png')
   registerNotifyIpc(() => mainWindow, iconPath)
   bindUiScaleToWindow(mainWindow, settings)
