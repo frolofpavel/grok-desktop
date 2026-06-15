@@ -45,6 +45,49 @@ interface BuildCliPromptOpts {
   /** Топ-5 воспоминаний проекта — те же что инжектятся API-провайдерам.
    *  Передаются в prepareParts → buildContextPack. */
   memories?: Array<{ type: string; content: string; tags: string[] }>
+  /** Жёсткий лимит символов всего payload (напр. argv-cap grok-cli = 8000).
+   *  При превышении середина (история → skill → context_pack) обрезается по
+   *  приоритету, но system-layer и САМО user-сообщение сохраняются всегда. */
+  maxChars?: number
+}
+
+/**
+ * Собрать payload так, чтобы `head` (system+user_layer) и `tail` (реальное
+ * сообщение пользователя) ВСЕГДА уцелели, а опциональную середину добрать по
+ * приоритету (порядок массива = приоритет удержания) пока хватает `maxChars`.
+ *
+ * Зачем: раньше grok-cli тупо резал готовый payload до argv-cap С КОНЦА —
+ * а сообщение приписано последним, поэтому именно оно и срезалось. Модель
+ * видела только системный промпт и отвечала дежурным приветствием на всё.
+ */
+function assemblePayload(
+  head: string,
+  middleByPriority: Array<{ order: number; text: string }>,
+  tail: string,
+  maxChars?: number
+): string {
+  const SEP = '\n\n'
+  const present = middleByPriority.filter(p => p.text)
+  if (!maxChars) {
+    const ordered = [...present].sort((a, b) => a.order - b.order).map(p => p.text)
+    return [head, ...ordered, tail].filter(Boolean).join(SEP)
+  }
+  // head + tail защищены; середину добираем по приоритету в рамках бюджета.
+  let remaining = maxChars - head.length - tail.length - SEP.length * 2
+  const kept: Array<{ order: number; text: string }> = []
+  for (const part of present) {
+    const cost = part.text.length + SEP.length
+    if (cost <= remaining) { kept.push(part); remaining -= cost }
+  }
+  kept.sort((a, b) => a.order - b.order) // обратно в естественный порядок вывода
+  let out = [head, ...kept.map(p => p.text), tail].filter(Boolean).join(SEP)
+  if (out.length > maxChars) {
+    // Даже head+tail не влезают (огромный system/user_layer или длинный вопрос):
+    // приоритет — у вопроса. Режем head, само сообщение оставляем целиком.
+    const room = Math.max(0, maxChars - tail.length - SEP.length - 16)
+    out = `${head.slice(0, room)}\n[…trimmed…]${SEP}${tail}`
+  }
+  return out
 }
 
 /**
@@ -56,8 +99,6 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
 
   const lastUser = messages.filter(m => m.role === 'user').at(-1)
   if (!lastUser) throw new Error('CLI prompt: нет user-сообщения')
-
-  const sections: string[] = []
 
   // 1. user_layer + context_pack — assembled by the shared helper so we don't
   //    drift away from how ipc/ai.ts does it for API providers.
@@ -79,23 +120,17 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
     : ''
 
   // 2. System envelope — grok-cli is neutral (no aggressive system prompt of
-  //    its own), gets the full system_layer.
-  {
-    const userBlock = effectiveUserLayer
-      ? `\n\n<user_layer source="${userLayer.path}">\n${effectiveUserLayer}\n</user_layer>`
-      : nativeLayerHint
-    sections.push(`${SYSTEM_LAYER_PROMPT}${userBlock}`)
-  }
-
-  // 3. Context pack — same content as API providers get, just appended as
-  //    a separate section in stdin payload.
-  if (contextPack) sections.push(contextPack)
+  //    its own), gets the full system_layer + user_layer. ВСЕГДА в payload.
+  const userBlock = effectiveUserLayer
+    ? `\n\n<user_layer source="${userLayer.path}">\n${effectiveUserLayer}\n</user_layer>`
+    : nativeLayerHint
+  const head = `${SYSTEM_LAYER_PROMPT}${userBlock}`
 
   // 3.5. Skill layer — специализация роли агента (активный скилл). Наслаивается
   //      ПОВЕРХ system/user/context, как в API-пути (compose-prompt.ts
   //      <skill_layer>): это выбор пользователя, а не наш базовый регламент.
   const trimmedSkill = (skillPrompt ?? '').trim()
-  if (trimmedSkill) sections.push(`<skill_layer>\n${trimmedSkill}\n</skill_layer>`)
+  const skillSection = trimmedSkill ? `<skill_layer>\n${trimmedSkill}\n</skill_layer>` : ''
 
   // 3. Conversation history — token-budgeted walk from newest to oldest.
   //    NEVER include system messages here (they're already above).
@@ -162,18 +197,18 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
     usedChars += wire.length
   }
   const includedCount = reversed.length
+  let historySection = ''
   if (includedCount > 0) {
     const droppedCount = candidates.length - includedCount
     const transcript = reversed.reverse().join('\n\n')
     const droppedNote = droppedCount > 0
       ? ` dropped="${droppedCount}" reason="budget"`
       : ''
-    sections.push(
-      `<conversation_history turns="${includedCount}"${droppedNote}>\n${transcript}\n</conversation_history>`
-    )
+    historySection = `<conversation_history turns="${includedCount}"${droppedNote}>\n${transcript}\n</conversation_history>`
   }
 
-  // 4. The actual user prompt — last message
+  // 4. The actual user prompt — last message. НИКОГДА не обрезается: это сам
+  //    вопрос. assemblePayload гарантирует, что head + это сообщение уцелеют.
   let userMessage = lastUser.content
   if (lastUser.attachments?.length) {
     const note = lastUser.attachments
@@ -181,7 +216,18 @@ export async function buildCliPrompt(opts: BuildCliPromptOpts): Promise<string> 
       .join('\n')
     userMessage = userMessage ? `${userMessage}\n\n${note}` : note
   }
-  sections.push(userMessage)
 
-  return sections.join('\n\n')
+  // 5. Бюджетная сборка. Естественный порядок вывода: system → context →
+  //    skill → history → вопрос. Приоритет УДЕРЖАНИЯ при нехватке maxChars:
+  //    история (важнее всего для follow-up) > skill (роль) > context_pack.
+  return assemblePayload(
+    head,
+    [
+      { order: 3, text: historySection },
+      { order: 2, text: skillSection },
+      { order: 1, text: contextPack ?? '' }
+    ],
+    userMessage,
+    opts.maxChars
+  )
 }

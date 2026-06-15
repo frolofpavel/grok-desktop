@@ -173,6 +173,14 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       // — поймаем в child.on('close') ниже и вернём user-friendly ошибку с
       // предложением переключиться на Grok API. Лучше пробовать, чем мириться
       // с обрезанным контекстом без системных правил.
+      //
+      // Жёсткий лимит payload под argv grok-cli (-p). БАГ, который чиним:
+      // раньше готовый payload резался до ARGV_CAP С КОНЦА — а user-сообщение
+      // приписано последним, поэтому именно оно и срезалось. Grok видел только
+      // system layer и отвечал «здарова, чем помочь?» на любое сообщение.
+      // Теперь maxChars=ARGV_CAP идёт в buildCliPrompt: он гарантирует, что
+      // system-layer И само сообщение влезают, обрезая середину (историю/контекст).
+      const ARGV_CAP = 8000
       const minimalMode = false
       let payload: string
       if (minimalMode) {
@@ -188,7 +196,8 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
             messages,
             projectSystemPrompt: opts.projectSystemPrompt,
             skillPrompt: opts.skillPrompt,
-            memories: opts.memories
+            memories: opts.memories,
+            maxChars: ARGV_CAP
           })
         } catch (err) {
           yield { type: 'error', message: err instanceof Error ? err.message : String(err) }
@@ -200,9 +209,9 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       if (opts.model && opts.model !== 'auto') args.push('-m', opts.model)
       // Back to -p argv (this is what worked before parity changes). stdin
       // through cmd.exe wrapper on Windows turned out to be even more unstable.
-      // Soft cap to 8KB so we never trip CreateProcess limits or grok's own
-      // internal buffers.
-      const ARGV_CAP = 8000
+      // Backstop: payload уже собран под ARGV_CAP в buildCliPrompt (maxChars,
+      // сохраняя system+вопрос), но на всякий случай не даём argv превысить
+      // лимит CreateProcess / внутренние буферы grok.
       if (payload.length > ARGV_CAP) {
         payload = payload.slice(0, ARGV_CAP) + '\n[truncated]'
       }
