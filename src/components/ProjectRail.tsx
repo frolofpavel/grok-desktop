@@ -3,6 +3,8 @@ import { useProject } from '../store/projectStore'
 import type { ProjectMeta } from '../types/api'
 import iconUrl from '../assets/icon.png'
 import { ProjectAvatar } from './ProjectAvatar'
+import { SettingsGearIcon } from './SettingsGearIcon'
+import { useT } from '../i18n'
 
 const RAIL_EXPANDED_KEY = 'gg-rail-expanded'
 const RAIL_WIDTH_COLLAPSED = '56px'
@@ -78,9 +80,11 @@ interface ProjectRailProps {
   sidebarOpen: boolean
   onToggleSidebar: () => void
   onOpenProjectSettings: (project: ProjectMeta) => void
+  onOpenAppSettings: () => void
 }
 
-export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSettings }: ProjectRailProps) {
+export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSettings, onOpenAppSettings }: ProjectRailProps) {
+  const t = useT()
   const { path, projectList, sessions, setProject, refreshProjectList } = useProject()
   const [bootstrapped, setBootstrapped] = useState(false)
   const [railExpanded, setRailExpanded] = useState(readRailExpanded)
@@ -233,6 +237,18 @@ export function ProjectRail({ sidebarOpen, onToggleSidebar, onOpenProjectSetting
             title="Открыть проект"
           >
             {railExpanded ? <span className="gg-rail-add-label">+ Открыть</span> : '+'}
+          </button>
+        </div>
+        <div className="gg-rail-footer">
+          <button
+            type="button"
+            className="gg-rail-app-settings"
+            onClick={onOpenAppSettings}
+            title={t.settings.title}
+            aria-label={t.settings.title}
+          >
+            <SettingsGearIcon size={18} />
+            {railExpanded && <span className="gg-rail-app-settings-label">{t.settings.title}</span>}
           </button>
         </div>
       </div>

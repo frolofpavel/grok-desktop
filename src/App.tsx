@@ -222,10 +222,11 @@ export function App() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(v => !v)}
         onOpenProjectSettings={setProjectSettingsTarget}
+        onOpenAppSettings={() => setShowSettings(true)}
       />
       {sidebarOpen && (
         <>
-          <Sidebar onOpenSettings={() => setShowSettings(true)} />
+          <Sidebar />
           <div
             className="gg-sidebar-resize"
             onMouseDown={startDrag}
