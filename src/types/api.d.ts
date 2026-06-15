@@ -102,6 +102,7 @@ declare global {
       }
       app: {
         getHomeDir: () => Promise<string>
+        getVersion: () => Promise<string>
         isFocused: () => Promise<boolean>
       }
       notify: {
@@ -288,6 +289,7 @@ declare global {
         onAvailable(cb: (data: { version: string }) => void): () => void
         onDownloaded(cb: (data: { version: string }) => void): () => void
         onProgress(cb: (data: { percent: number }) => void): () => void
+        onNotAvailable(cb: () => void): () => void
       }
       audit: {
         query(projectPath: string, opts?: { limit?: number; action?: string; since?: number }): Promise<AuditEntry[]>

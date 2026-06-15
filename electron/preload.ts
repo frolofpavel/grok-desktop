@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   app: {
     getHomeDir: () => ipcRenderer.invoke('app:home-dir') as Promise<string>,
+    getVersion: () => ipcRenderer.invoke('app:version') as Promise<string>,
     isFocused: () => ipcRenderer.invoke('app:is-focused') as Promise<boolean>
   },
   notify: {
@@ -230,6 +231,11 @@ contextBridge.exposeInMainWorld('api', {
       const handler = (_e: unknown, data: { percent: number }) => cb(data)
       ipcRenderer.on('update:progress', handler)
       return () => { ipcRenderer.off('update:progress', handler) }
+    },
+    onNotAvailable: (cb: () => void) => {
+      const handler = () => cb()
+      ipcRenderer.on('update:not-available', handler)
+      return () => { ipcRenderer.off('update:not-available', handler) }
     },
   },
   audit: {

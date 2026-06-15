@@ -85,6 +85,22 @@ export const en = {
     notifyUnfocusedOnly: 'Only when Grok Desktop is not focused',
     notifyTest: 'Test',
     notifyHint: 'Fires when the agent finishes a chat response. Click the toast to focus the app.',
+    updates: 'Updates',
+    currentVersion: 'Current version',
+    checkUpdates: 'Check for updates',
+    checkingUpdates: 'Checking…',
+    upToDate: 'You have the latest version',
+    downloadingUpdate: 'Downloading v{version}… {percent}%',
+    updateReady: 'v{version} is ready to install',
+    installUpdate: 'Install',
+    updateError: 'Could not check for updates',
+    updatesHint: 'On launch we check GitHub Releases (frolofpavel/grok-desktop). Download starts automatically; install when you click Install.',
+  },
+
+  updates: {
+    downloadingBar: 'Downloading update v{version}… {percent}%',
+    readyBar: 'Update v{version} is ready',
+    install: 'Install',
   },
 
   // Model picker

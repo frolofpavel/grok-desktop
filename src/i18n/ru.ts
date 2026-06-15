@@ -82,6 +82,22 @@ export const ru: Translations = {
     notifyUnfocusedOnly: 'Только когда окно Grok Desktop не активно',
     notifyTest: 'Проверить',
     notifyHint: 'Срабатывает по окончании ответа агента в чате. Клик по уведомлению возвращает в приложение.',
+    updates: 'Обновления',
+    currentVersion: 'Текущая версия',
+    checkUpdates: 'Проверить обновления',
+    checkingUpdates: 'Проверяю…',
+    upToDate: 'Установлена последняя версия',
+    downloadingUpdate: 'Скачивание v{version}… {percent}%',
+    updateReady: 'Готова версия {version}',
+    installUpdate: 'Установить',
+    updateError: 'Не удалось проверить обновления',
+    updatesHint: 'При запуске проверяем GitHub Releases (frolofpavel/grok-desktop). Скачивание начинается само; установка — по кнопке «Установить».',
+  },
+
+  updates: {
+    downloadingBar: 'Скачивание обновления v{version}… {percent}%',
+    readyBar: 'Доступно обновление v{version}',
+    install: 'Установить',
   },
   modelPicker: {
     changeModel: 'Сменить модель / провайдер',

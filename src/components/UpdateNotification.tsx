@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useT } from '../i18n'
 
 /**
- * Полоска внизу экрана — показывает прогресс скачивания обновления
- * и кнопку «Перезапустить» когда обновление готово.
- * Рендерится всегда, но видна только при наличии обновления.
+ * Полоска внизу экрана — прогресс скачивания и кнопка «Установить».
  */
 export function UpdateNotification() {
+  const t = useT()
   const [state, setState] = useState<'idle' | 'downloading' | 'ready'>('idle')
   const [version, setVersion] = useState('')
   const [percent, setPercent] = useState(0)
@@ -35,15 +35,19 @@ export function UpdateNotification() {
     <div className="gg-update-bar">
       {state === 'downloading' && (
         <>
-          <span>⬇️ Downloading v{version}... {percent}%</span>
+          <span>
+            {t.updates.downloadingBar
+              .replace('{version}', version)
+              .replace('{percent}', String(percent))}
+          </span>
           <div className="gg-update-progress" style={{ width: `${percent}%` }} />
         </>
       )}
       {state === 'ready' && (
         <>
-          <span>✨ v{version} ready</span>
-          <button onClick={() => window.api.updater.install()}>
-            Restart to update
+          <span>{t.updates.readyBar.replace('{version}', version)}</span>
+          <button type="button" onClick={() => void window.api.updater.install()}>
+            {t.updates.install}
           </button>
         </>
       )}

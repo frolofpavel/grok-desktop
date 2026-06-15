@@ -5,6 +5,7 @@ import type { ProviderId } from '../hooks/useProvider'
 import { useTheme, THEMES } from '../hooks/useTheme'
 import { useUiScale, UI_SCALE_PRESETS, MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT } from '../hooks/useUiScale'
 import { useNotifySettings } from '../hooks/useNotifySettings'
+import { UpdatesSettings } from './UpdatesSettings'
 import type { AutonomousStatus } from '../types/api'
 import { ProfilesTab } from './ProfilesTab'
 import { buildCatalog, connectionStatus, type ConnectionStatus } from '../lib/model-catalog'
@@ -53,7 +54,7 @@ const PROVIDERS: ProviderConfig[] = [
   }
 ]
 
-type Tab = 'appearance' | 'notifications' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
+type Tab = 'appearance' | 'notifications' | 'updates' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
 
 // TAB_GROUPS is built inside the Settings component to support i18n translations.
 
@@ -772,6 +773,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
     { title: t.settings.application, tabs: [
       { id: 'appearance', label: t.settings.appearance, icon: '🎨' },
       { id: 'notifications', label: t.settings.notifications, icon: '🔔' },
+      { id: 'updates', label: t.settings.updates, icon: '⬆️' },
       { id: 'profiles',   label: t.settings.profiles,   icon: '👤' }
     ] },
     { title: t.settings.server, tabs: [
@@ -1306,6 +1308,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         )}
+
+        {tab === 'updates' && <UpdatesSettings />}
 
         {tab === 'notifications' && (
         <div className="gg-settings-extra">

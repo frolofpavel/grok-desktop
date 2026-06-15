@@ -32,6 +32,7 @@ export function registerProjectIpc(projects: Projects): void {
   })
 
   ipcMain.handle('app:home-dir', () => app.getPath('home'))
+  ipcMain.handle('app:version', () => app.getVersion())
 
   ipcMain.handle('projects:list', () => projects.list())
   ipcMain.handle('projects:rename', (_e, path: string, name: string) => projects.rename(path, name))
