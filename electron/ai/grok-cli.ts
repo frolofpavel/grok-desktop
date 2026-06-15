@@ -180,7 +180,15 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       // system layer и отвечал «здарова, чем помочь?» на любое сообщение.
       // Теперь maxChars=ARGV_CAP идёт в buildCliPrompt: он гарантирует, что
       // system-layer И само сообщение влезают, обрезая середину (историю/контекст).
-      const ARGV_CAP = 8000
+      //
+      // Размер лимита зависит от того, как запущен бинарь:
+      //  - .cmd/.ps1 обёртка (npm-установка) идёт через cmd.exe, а у него
+      //    жёсткий потолок командной строки ~8191 символ → cap 8000.
+      //  - прямой .exe идёт через CreateProcess (лимит ~32767) → можно дать
+      //    намного больше. Это и есть память беседы на подписке (Grok Build):
+      //    система ~6К + ~24К истории, без падения на cmd.exe.
+      const usesShell = binary.endsWith('.cmd') || binary.endsWith('.ps1')
+      const ARGV_CAP = usesShell ? 8000 : 30000
       const minimalMode = false
       let payload: string
       if (minimalMode) {
