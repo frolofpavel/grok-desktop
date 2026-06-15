@@ -74,6 +74,17 @@ export const en = {
     application: 'Application',
     server: 'Server',
     resizeDrag: 'Drag to resize',
+    uiScale: 'Interface scale',
+    uiScaleHint: 'Scales the entire UI — text, buttons, and panels. Useful on ultrawide or 4K monitors. Also adjustable with Ctrl + mouse wheel; Ctrl+0 resets to 100%.',
+    uiScaleReset: 'Reset (100%)',
+    notifications: 'Notifications',
+    notifyTitle: 'Notifications',
+    notifyIntro: 'Enable sound only, toast only, or both — whatever works for you.',
+    notifySound: 'Sound (Windows system notification)',
+    notifyToast: 'Toast (bottom-right popup)',
+    notifyUnfocusedOnly: 'Only when Grok Desktop is not focused',
+    notifyTest: 'Test',
+    notifyHint: 'Fires when the agent finishes a chat response. Click the toast to focus the app.',
   },
 
   // Model picker

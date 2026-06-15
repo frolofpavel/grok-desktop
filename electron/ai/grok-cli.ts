@@ -1,7 +1,9 @@
 import { spawn } from 'child_process'
 import { platform } from 'os'
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { tmpdir } from 'os'
+import { randomUUID } from 'crypto'
 import type { ChatProvider, ChatMessage, ChatEvent, ToolDefinition, ToolResult } from './types'
 import { buildCliPrompt } from './cli-prompt'
 import { treeKill } from './child-kill'
@@ -203,10 +205,15 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       // Soft cap to 8KB so we never trip CreateProcess limits or grok's own
       // internal buffers.
       const ARGV_CAP = 8000
+      let promptFile: string | null = null
       if (payload.length > ARGV_CAP) {
-        payload = payload.slice(0, ARGV_CAP) + '\n[truncated]'
+        // Never slice(0, cap) — that drops <current_user_request> at the tail.
+        promptFile = join(tmpdir(), `grok-desktop-prompt-${randomUUID()}.txt`)
+        writeFileSync(promptFile, payload, 'utf8')
+        args.push('--prompt-file', promptFile)
+      } else {
+        args.push('-p', payload)
       }
-      args.push('-p', payload)
 
       const child = spawn(binary, args, {
         cwd,
@@ -284,10 +291,16 @@ export function createGrokCliProvider(opts: GrokCliOptions = {}): ChatProvider {
       child.stderr.on('data', (chunk: string) => { stderrBuffer += chunk })
 
       child.on('error', (err) => {
+        if (promptFile) {
+          try { unlinkSync(promptFile) } catch { /* noop */ }
+        }
         queue.push({ type: 'error', message: `Запуск Grok CLI не удался: ${err.message}` })
         done = true; wake()
       })
       child.on('close', (code) => {
+        if (promptFile) {
+          try { unlinkSync(promptFile) } catch { /* noop */ }
+        }
         if (stdoutBuffer.length > 0) processLine(stdoutBuffer)
         // Если CLI закрылся БЕЗ turn_complete event'а (некоторые версии grok
         // так делают), но в буфере есть текст — флашим вручную.

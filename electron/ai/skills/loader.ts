@@ -27,6 +27,11 @@ const USER_SKILLS_DIR = join(homedir(), '.verstak', 'skills')
  *  файл с одинаковым id — .verstak/skills/ имеет приоритет (это явный
  *  GG-override). */
 const CLAUDE_SKILLS_DIR = join(homedir(), '.claude', 'skills')
+/** Grok Build CLI — те же скиллы что в ~/.grok/skills/{id}/SKILL.md и bundled. */
+const GROK_SKILL_ROOTS = [
+  join(homedir(), '.grok', 'skills'),
+  join(homedir(), '.grok', 'bundled', 'skills')
+]
 const SERVER_TIMEOUT_MS = 5_000
 
 /** Конфиг loader — путь к серверу читается из settings. */
@@ -71,6 +76,19 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
     }
   }
 
+  // 2b) Grok Build CLI skills — folder layout: {root}/{id}/SKILL.md
+  for (const root of GROK_SKILL_ROOTS) {
+    try {
+      const skills = await loadFromGrokTree(root)
+      for (const s of skills) {
+        byId.set(s.id, s)
+        userCount++
+      }
+    } catch (err) {
+      failed.push(`${root}: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   // 3) Server API — последний, чтобы перебивал остальное
   let serverCount = 0
   let serverReachable = false
@@ -97,6 +115,23 @@ export async function loadAllSkills(config: LoaderConfig = {}): Promise<LoadResu
     },
     serverReachable
   }
+}
+
+async function loadFromGrokTree(root: string): Promise<Skill[]> {
+  const entries = await readdir(root, { withFileTypes: true }).catch(() => [])
+  const out: Skill[] = []
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue
+    const skillPath = join(root, ent.name, 'SKILL.md')
+    try {
+      const raw = await readFile(skillPath, 'utf8')
+      const skill = parseSkillFile(raw, skillPath, 'user', ent.name)
+      if (skill) out.push(skill)
+    } catch {
+      // no SKILL.md in this folder — skip
+    }
+  }
+  return out
 }
 
 async function loadFromDir(dir: string): Promise<Skill[]> {
@@ -140,22 +175,35 @@ async function loadFromServer(serverBase: string): Promise<Skill[]> {
   }
 }
 
-function parseSkillFile(raw: string, sourceRef: string, source: Skill['source']): Skill | null {
+function parseSkillFile(
+  raw: string,
+  sourceRef: string,
+  source: Skill['source'],
+  folderId?: string
+): Skill | null {
   const doc = parseSkillDoc(raw)
   const fm = doc.frontmatter as Partial<SkillFrontmatter>
-  if (!fm.id || typeof fm.id !== 'string') {
-    console.warn(`[skills] ${sourceRef}: missing or invalid 'id' in frontmatter, skipping`)
+  const id =
+    (typeof fm.id === 'string' && fm.id) ||
+    (typeof fm.name === 'string' && fm.name) ||
+    folderId
+  if (!id) {
+    console.warn(`[skills] ${sourceRef}: missing id/name in frontmatter, skipping`)
     return null
   }
+  const slash =
+    (typeof fm.slash === 'string' && fm.slash) ||
+    (typeof fm.name === 'string' && fm.name.replace(/^\//, '')) ||
+    folderId
   return {
-    id: fm.id,
-    name: fm.name,
+    id,
+    name: typeof fm.name === 'string' ? fm.name : id,
     description: fm.description,
     icon: fm.icon,
     default_provider: fm.default_provider as ProviderId | undefined,
     default_model: fm.default_model,
     default_mode: fm.default_mode as AgentMode | undefined,
-    slash: fm.slash,
+    slash,
     tools_allow: fm.tools_allow,
     suggested_prompts: fm.suggested_prompts,
     context_loaders: fm.context_loaders,

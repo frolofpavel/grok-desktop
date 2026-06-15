@@ -3,6 +3,8 @@ import { useProject } from '../store/projectStore'
 import type { Memory, DetectedCli, AuditEntry, DoctorReport, DoctorItem, DoctorStatus, ProviderDescriptorDTO, PolicyMatrixDTO, PolicyDecision, AgentModeId } from '../types/api'
 import type { ProviderId } from '../hooks/useProvider'
 import { useTheme, THEMES } from '../hooks/useTheme'
+import { useUiScale, UI_SCALE_PRESETS, MIN_UI_SCALE_PERCENT, MAX_UI_SCALE_PERCENT } from '../hooks/useUiScale'
+import { useNotifySettings } from '../hooks/useNotifySettings'
 import type { AutonomousStatus } from '../types/api'
 import { ProfilesTab } from './ProfilesTab'
 import { buildCatalog, connectionStatus, type ConnectionStatus } from '../lib/model-catalog'
@@ -51,7 +53,7 @@ const PROVIDERS: ProviderConfig[] = [
   }
 ]
 
-type Tab = 'appearance' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
+type Tab = 'appearance' | 'notifications' | 'profiles' | 'providers' | 'models' | 'connectors' | 'autonomous' | 'memory' | 'mcp' | 'audit' | 'policy'
 
 // TAB_GROUPS is built inside the Settings component to support i18n translations.
 
@@ -769,6 +771,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const TAB_GROUPS: ReadonlyArray<{ title: string; tabs: ReadonlyArray<{ id: Tab; label: string; icon: React.ReactNode }> }> = [
     { title: t.settings.application, tabs: [
       { id: 'appearance', label: t.settings.appearance, icon: '🎨' },
+      { id: 'notifications', label: t.settings.notifications, icon: '🔔' },
       { id: 'profiles',   label: t.settings.profiles,   icon: '👤' }
     ] },
     { title: t.settings.server, tabs: [
@@ -809,6 +812,14 @@ export function Settings({ onClose }: { onClose: () => void }) {
   const [coreMemorySaved, setCoreMemorySaved] = useState(false)
   const [currentLang, setCurrentLang] = useState('en')
   const { theme, setTheme, squareCorners, setSquareCorners } = useTheme()
+  const { uiScalePercent, setUiScalePercent } = useUiScale()
+  const {
+    notifyPrefs,
+    setNotifySound,
+    setNotifyToast,
+    setNotifyUnfocusedOnly,
+    testNotification
+  } = useNotifySettings()
   // Audit log
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([])
   const [auditPath, setAuditPath] = useState<string | null>(null)
@@ -1296,6 +1307,43 @@ export function Settings({ onClose }: { onClose: () => void }) {
         </div>
         )}
 
+        {tab === 'notifications' && (
+        <div className="gg-settings-extra">
+          <div className="gg-settings-section-title">{t.settings.notifications}</div>
+          <div className="gg-settings-hint" style={{ marginBottom: 16 }}>{t.settings.notifyIntro}</div>
+          <div className="gg-notify-settings">
+            <label className="gg-theme-square">
+              <input
+                type="checkbox"
+                checked={notifyPrefs.sound}
+                onChange={(e) => void setNotifySound(e.target.checked)}
+              />
+              <span>{t.settings.notifySound}</span>
+            </label>
+            <label className="gg-theme-square">
+              <input
+                type="checkbox"
+                checked={notifyPrefs.toast}
+                onChange={(e) => void setNotifyToast(e.target.checked)}
+              />
+              <span>{t.settings.notifyToast}</span>
+            </label>
+            <label className="gg-theme-square">
+              <input
+                type="checkbox"
+                checked={notifyPrefs.unfocusedOnly}
+                onChange={(e) => void setNotifyUnfocusedOnly(e.target.checked)}
+              />
+              <span>{t.settings.notifyUnfocusedOnly}</span>
+            </label>
+            <button type="button" className="gg-btn gg-btn-ghost" onClick={() => void testNotification()}>
+              {t.settings.notifyTest}
+            </button>
+            <div className="gg-settings-hint">{t.settings.notifyHint}</div>
+          </div>
+        </div>
+        )}
+
         {tab === 'profiles' && (<ProfilesTab />)}
 
         {tab === 'memory' && (
@@ -1444,7 +1492,45 @@ export function Settings({ onClose }: { onClose: () => void }) {
             />
             <span>Прямые углы (без скруглений)</span>
           </label>
-          <div className="gg-settings-hint">
+
+          <div className="gg-settings-section-title" style={{ marginTop: 8 }}>{t.settings.uiScale}</div>
+          <div className="gg-ui-scale-block">
+            <div className="gg-ui-scale-head">
+              <span className="gg-ui-scale-value">{uiScalePercent}%</span>
+              <button
+                type="button"
+                className="gg-btn gg-btn-ghost"
+                onClick={() => void setUiScalePercent(100)}
+              >
+                {t.settings.uiScaleReset}
+              </button>
+            </div>
+            <input
+              type="range"
+              className="gg-ui-scale-slider"
+              min={MIN_UI_SCALE_PERCENT}
+              max={MAX_UI_SCALE_PERCENT}
+              step={5}
+              value={uiScalePercent}
+              onChange={(e) => void setUiScalePercent(Number(e.target.value))}
+              aria-label={t.settings.uiScale}
+            />
+            <div className="gg-ui-scale-presets" role="group" aria-label={t.settings.uiScale}>
+              {UI_SCALE_PRESETS.map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={`gg-btn gg-btn-ghost ${uiScalePercent === preset ? 'is-active' : ''}`}
+                  onClick={() => void setUiScalePercent(preset)}
+                >
+                  {preset}%
+                </button>
+              ))}
+            </div>
+            <div className="gg-settings-hint">{t.settings.uiScaleHint}</div>
+          </div>
+
+          <div className="gg-settings-hint" style={{ marginTop: 12 }}>
             Тема применяется мгновенно. Ширина боковой панели запоминается автоматически — потяни за её правый край.
           </div>
           <div className="gg-settings-row" style={{ marginTop: 16 }}>

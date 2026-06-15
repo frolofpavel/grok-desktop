@@ -12,6 +12,12 @@ import {
   type RunningPlanStep,
   type SessionSnapshot
 } from './session-snapshot'
+import {
+  buildComposerReconcilePatch,
+  hasComposerReconcileChanges,
+  inflightSendForChat,
+  isActiveChatBusy
+} from './streaming-guard'
 
 /** Preflight-карточка: агент объявил план перед сложной/деструктивной задачей.
  *  Эфемерное — живёт только в активной сессии, чистится как activity. */
@@ -114,6 +120,8 @@ interface ProjectState {
    *
    *  See SendOwner type для возможных видов владельцев. */
   sendOwners: Record<number, SendOwner>
+  /** Краткий флаг: ждём ai:send до registerSendOwner (закрывает race-окно). */
+  outboundChatId: number | null
   /** Review state, keyed by reviewChatId. Pre-loaded on chat switch via
    *  refreshReviewsFor() and updated live during streaming. */
   reviews: Record<number, ReviewState>
@@ -128,6 +136,7 @@ interface ProjectState {
   setProject: (path: string) => Promise<void>
   closeProject: () => void
   refreshProjectList: () => Promise<void>
+  updateProjectMeta: (path: string, patch: { name?: string; iconPath?: string | null }) => Promise<ProjectMeta | null>
   removeProject: (path: string) => Promise<void>
   setActiveView: (v: ViewId) => void
   addMessage: (msg: ChatMessage) => void
@@ -136,6 +145,14 @@ interface ProjectState {
    *  a collapsible block, not as part of the visible answer. */
   appendLastAssistantThinking: (text: string) => void
   setStreaming: (v: boolean) => void
+  /** Пометить чат как «отправляем» до получения sendId из main. */
+  beginOutboundSend: (chatId: number) => void
+  /** Снять outbound-флаг; isStreaming синхронизируется с sendOwners. */
+  clearOutboundSend: () => void
+  /** Сверка с main process (activeAborts) — снимает залипший ввод. */
+  reconcileComposerState: () => Promise<void>
+  /** Активный чат занят стримом или ожидает sendId. */
+  isComposerBusy: () => boolean
   addPendingWrite: (w: PendingWrite) => void
   resolvePendingWrite: (callId: string) => void
   clearPendingWrites: () => void
@@ -223,6 +240,47 @@ interface ProjectState {
 // on every await boundary if our token is no longer current.
 let setProjectToken = 0
 
+// Same pattern for switchChatSession — без guard'а быстрые клики по чатам
+// применяли устаревший chats.list() и все вкладки показывали одну переписку.
+let switchChatToken = 0
+
+export const LAST_PROJECT_PATH_KEY = 'last_project_path'
+
+function sortProjectsByName(list: ProjectMeta[]): ProjectMeta[] {
+  return [...list].sort(
+    (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) || a.path.localeCompare(b.path)
+  )
+}
+
+function cloneSnapshot(snap: SessionSnapshot): SessionSnapshot {
+  return {
+    messages: snap.messages.map(m => ({ ...m })),
+    isStreaming: snap.isStreaming,
+    pendingWrites: snap.pendingWrites.map(w => ({ ...w })),
+    pendingCommand: snap.pendingCommand ? { ...snap.pendingCommand } : null,
+    activity: snap.activity.map(a => ({ ...a })),
+    sessionUsage: { ...snap.sessionUsage },
+    runningPlanStep: snap.runningPlanStep ? { ...snap.runningPlanStep } : null,
+    hasUnread: snap.hasUnread
+  }
+}
+
+const chatSwitchEphemeralReset = {
+  preflights: [] as PreflightCard[],
+  subagentRuns: [] as SubagentRunCard[],
+  artifacts: [] as ProjectState['artifacts'],
+  touchedFiles: {} as Record<string, TouchKind>,
+  checkpointId: null as number | null,
+  openedReviewId: null as number | null,
+  previewArtifactId: null as string | null,
+  /** Модалка подтверждения команды из другого чата не должна блокировать UI. */
+  pendingCommand: null as PendingCommand | null
+}
+
+function syncActiveStreamingFlag(s: Pick<ProjectState, 'activeChatId' | 'sendOwners' | 'outboundChatId'>): boolean {
+  return isActiveChatBusy(s.activeChatId, s.sendOwners, s.outboundChatId)
+}
+
 export const useProject = create<ProjectState>((set, get) => ({
   path: null,
   tree: [],
@@ -244,6 +302,7 @@ export const useProject = create<ProjectState>((set, get) => ({
   sessions: {},
   chatSnapshots: {},
   sendOwners: {},
+  outboundChatId: null,
   reviews: {},
   openedReviewId: null,
   artifacts: [],
@@ -273,6 +332,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     const tree = await window.api.files.tree(path)
     if (myToken !== setProjectToken) return  // a newer setProject took over
     await window.api.projects.setCurrent(path)
+    void window.api.settings.setKey(LAST_PROJECT_PATH_KEY, path)
     if (myToken !== setProjectToken) return
     const projectList = await window.api.projects.list()
     if (myToken !== setProjectToken) return
@@ -299,10 +359,14 @@ export const useProject = create<ProjectState>((set, get) => ({
     }
     // Pick the most recent active session (top of list)
     const activeChatId = chatSessions[0]?.id ?? null
-    if (activeChatId && !existing) {
+    if (activeChatId) {
       const history = await window.api.chats.list(activeChatId)
       if (myToken !== setProjectToken) return
-      target.messages = history.map(m => ({ role: m.role, content: m.content }))
+      // Always hydrate from DB on project open unless we have a live in-memory
+      // snapshot from this app session (backgrounded project with active stream).
+      if (!existing || existing.messages.length === 0) {
+        target.messages = history.map(m => ({ role: m.role, content: m.content }))
+      }
     }
 
     if (myToken !== setProjectToken) return  // final safety before commit
@@ -336,6 +400,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     })
     // Подгружаем ревью для активного чата (если есть). Fire-and-forget.
     if (activeChatId != null) {
+      void get().reconcileComposerState()
       void get().refreshReviewsFor(activeChatId)
     }
   },
@@ -350,6 +415,14 @@ export const useProject = create<ProjectState>((set, get) => ({
   refreshProjectList: async () => {
     const projectList = await window.api.projects.list()
     set({ projectList })
+  },
+  updateProjectMeta: async (path, patch) => {
+    const updated = await window.api.projects.updateMeta(path, patch)
+    if (!updated) return null
+    set(s => ({
+      projectList: sortProjectsByName(s.projectList.map(p => (p.path === path ? updated : p)))
+    }))
+    return updated
   },
   removeProject: async (path: string) => {
     await window.api.projects.remove(path)
@@ -377,7 +450,39 @@ export const useProject = create<ProjectState>((set, get) => ({
     }
     return { messages: msgs }
   }),
-  setStreaming: (v) => set({ isStreaming: v }),
+  setStreaming: (v) => set(s => {
+    if (v) return { isStreaming: true }
+    const busy = syncActiveStreamingFlag(s)
+    return busy ? {} : { isStreaming: false }
+  }),
+  beginOutboundSend: (chatId) => set({ outboundChatId: chatId, isStreaming: true }),
+  clearOutboundSend: () => set(s => {
+    const next = { ...s, outboundChatId: null as number | null }
+    return { outboundChatId: null, isStreaming: syncActiveStreamingFlag(next) }
+  }),
+  isComposerBusy: () => {
+    const s = get()
+    return syncActiveStreamingFlag(s)
+  },
+  reconcileComposerState: async () => {
+    try {
+      const activeSendIds = await window.api.ai.activeSends()
+      const s = get()
+      const patch = buildComposerReconcilePatch({
+        activeChatId: s.activeChatId,
+        isStreaming: s.isStreaming,
+        sendOwners: s.sendOwners,
+        outboundChatId: s.outboundChatId,
+        pendingCommand: s.pendingCommand,
+        pendingWrites: s.pendingWrites
+      }, activeSendIds)
+      if (hasComposerReconcileChanges(patch)) set(patch)
+    } catch {
+      // Без IPC — хотя бы снять залипший флаг без живого owner
+      const s = get()
+      if (s.isStreaming && !syncActiveStreamingFlag(s)) set({ isStreaming: false, outboundChatId: null })
+    }
+  },
   addPendingWrite: (w) => set(s => ({ pendingWrites: [...s.pendingWrites, w] })),
   resolvePendingWrite: (callId) => set(s => ({ pendingWrites: s.pendingWrites.filter(w => w.callId !== callId) })),
   clearPendingWrites: () => set({ pendingWrites: [] }),
@@ -460,6 +565,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     return { sessions: { ...s.sessions, [projectPath]: { ...existing, hasUnread: false } } }
   }),
   switchChatSession: async (id) => {
+    const myToken = ++switchChatToken
     const s = get()
     if (!s.path) return
     // 1) Snapshot CURRENT chat state so its in-flight stream survives the
@@ -467,7 +573,7 @@ export const useProject = create<ProjectState>((set, get) => ({
     //    routed into chatSnapshots[oldChatId] by Chat.tsx event handler.
     const nextSnapshots = { ...s.chatSnapshots }
     if (s.activeChatId != null && s.activeChatId !== id) {
-      nextSnapshots[s.activeChatId] = {
+      nextSnapshots[s.activeChatId] = cloneSnapshot({
         messages: s.messages,
         isStreaming: s.isStreaming,
         pendingWrites: s.pendingWrites,
@@ -476,40 +582,59 @@ export const useProject = create<ProjectState>((set, get) => ({
         sessionUsage: s.sessionUsage,
         runningPlanStep: s.runningPlanStep,
         hasUnread: false
-      }
+      })
     }
     // 2) Restore target — from snapshot if it has one (chat was backgrounded
     //    earlier in this session), otherwise load history from DB.
     const restored = nextSnapshots[id]
-    let messages: ChatMessage[]
-    let isStreaming = false
-    let pendingWrites: PendingWrite[] = []
-    let pendingCommand: PendingCommand | null = null
-    let activity: ActivityEntry[] = []
-    let sessionUsage: SessionUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
-    let runningPlanStep: RunningPlanStep | null = null
     if (restored) {
-      messages = restored.messages
-      isStreaming = restored.isStreaming
-      pendingWrites = restored.pendingWrites
-      pendingCommand = restored.pendingCommand
-      activity = restored.activity
-      sessionUsage = restored.sessionUsage
-      runningPlanStep = restored.runningPlanStep
-      delete nextSnapshots[id]  // it becomes active, no need to keep snapshot
+      delete nextSnapshots[id]
+      const snap = cloneSnapshot(restored)
+      set({
+        activeChatId: id,
+        messages: snap.messages,
+        isStreaming: snap.isStreaming,
+        pendingWrites: snap.pendingWrites,
+        pendingCommand: snap.pendingCommand,
+        activity: snap.activity,
+        sessionUsage: snap.sessionUsage,
+        runningPlanStep: snap.runningPlanStep,
+        chatSnapshots: nextSnapshots,
+        ...chatSwitchEphemeralReset,
+        outboundChatId: null
+      })
     } else {
+      // Сразу переключаем activeChatId и очищаем messages — иначе до ответа
+      // chats.list() пользователь видит переписку предыдущего чата.
+      set({
+        activeChatId: id,
+        messages: [],
+        isStreaming: false,
+        pendingWrites: [],
+        pendingCommand: null,
+        activity: [],
+        sessionUsage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+        runningPlanStep: null,
+        chatSnapshots: nextSnapshots,
+        ...chatSwitchEphemeralReset,
+        outboundChatId: null
+      })
       const history = await window.api.chats.list(id)
-      messages = history.map(m => ({ role: m.role, content: m.content }))
+      if (myToken !== switchChatToken) return
+      set({
+        messages: history.map(m => ({ role: m.role, content: m.content }))
+      })
     }
     // Per-chat provider: if the session has providerId / model saved, apply
     // them to the global settings so the next ai:send uses that provider.
     // Sanity check: if stored (providerId, model) pair is invalid (e.g. older
     // bug saved another provider's model on this session), drop the model so
     // useProvider falls back to the provider's default.
-    const session = s.chatSessions.find(c => c.id === id)
+    const session = get().chatSessions.find(c => c.id === id)
     if (session?.providerId) {
       try {
         await window.api.settings.setKey('provider', session.providerId)
+        if (myToken !== switchChatToken) return
         if (session.model && isModelValidForProvider(session.providerId, session.model)) {
           await window.api.settings.setKey(`model_${session.providerId}`, session.model)
         } else if (session.model) {
@@ -517,35 +642,33 @@ export const useProject = create<ProjectState>((set, get) => ({
           await window.api.settings.setKey(`model_${session.providerId}`, '')
           await window.api.chatSessions.setModel(id, session.providerId, null)
         }
+        if (myToken !== switchChatToken) return
       } catch { /* settings write failure shouldn't block chat switch */ }
     }
-    set({
-      activeChatId: id,
-      messages,
-      isStreaming,
-      pendingWrites,
-      pendingCommand,
-      activity,
-      sessionUsage,
-      runningPlanStep,
-      chatSnapshots: nextSnapshots,
-      // Grok audit fix: openedReviewId переживал смену чата и мог показать
-      // панель чужого ревью. Сбрасываем при каждом switch.
-      openedReviewId: null
-    })
+    if (myToken !== switchChatToken) return
+    void get().reconcileComposerState()
     // Подгружаем review sub-chats этого main-чата (fire-and-forget — pills
     // появятся когда подгрузятся; основная навигация не блокируется).
     void get().refreshReviewsFor(id)
   },
-  registerSendOwner: (sendId, owner) => set(s => ({
-    sendOwners: { ...s.sendOwners, [sendId]: owner }
-  })),
+  registerSendOwner: (sendId, owner) => set(s => {
+    const sendOwners = { ...s.sendOwners, [sendId]: owner }
+    const next = { ...s, sendOwners, outboundChatId: null as number | null }
+    const patch: Partial<ProjectState> = { sendOwners, outboundChatId: null }
+    if (owner.kind === 'chat' && owner.chatId === s.activeChatId) {
+      patch.isStreaming = true
+    } else {
+      patch.isStreaming = syncActiveStreamingFlag(next)
+    }
+    return patch
+  }),
   lookupSendOwner: (sendId) => get().sendOwners[sendId] ?? null,
   forgetSendOwner: (sendId) => set(s => {
     if (!(sendId in s.sendOwners)) return {}
-    const next = { ...s.sendOwners }
-    delete next[sendId]
-    return { sendOwners: next }
+    const sendOwners = { ...s.sendOwners }
+    delete sendOwners[sendId]
+    const next = { ...s, sendOwners }
+    return { sendOwners, isStreaming: syncActiveStreamingFlag(next) }
   }),
   applyEventToChat: (chatId, event) => set(s => {
     const existing = s.chatSnapshots[chatId] ?? freshSnapshot()

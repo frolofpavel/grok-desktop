@@ -8,7 +8,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 const appendSpy = vi.fn(async () => {})
 vi.stubGlobal('window', {
   api: {
-    chats: { append: appendSpy }
+    chats: { append: appendSpy },
+    ai: { activeSends: vi.fn(async () => []) }
   }
 })
 
@@ -32,6 +33,7 @@ function resetStore() {
     activeChatId: null,
     chatSnapshots: {},
     sendOwners: {},
+    outboundChatId: null,
     reviews: {},
     openedReviewId: null
   }, false)

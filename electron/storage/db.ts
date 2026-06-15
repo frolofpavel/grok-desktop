@@ -315,6 +315,16 @@ const MIGRATIONS: Array<{ version: number; description: string; run: (db: DB) =>
       db.exec('ALTER TABLE plan_steps ADD COLUMN verification_status TEXT')
       db.exec('ALTER TABLE plan_steps ADD COLUMN changed_files_count INTEGER')
     }
+  },
+  {
+    version: 12,
+    description: 'projects.icon_path — пользовательская иконка проекта (PNG в userData)',
+    run: (db: DB) => {
+      const cols = (db.prepare('PRAGMA table_info(projects)').all() as Array<{ name: string }>).map(c => c.name)
+      if (!cols.includes('icon_path')) {
+        db.exec('ALTER TABLE projects ADD COLUMN icon_path TEXT')
+      }
+    }
   }
 ]
 

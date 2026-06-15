@@ -16,6 +16,10 @@
     "predev": "npm run electron-rebuild",
     "dist": "npm run electron-rebuild && npm run build && electron-builder",
     "dist:win": "npm run electron-rebuild && npm run build && electron-builder --win --x64",
+    "deploy:local": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-local.ps1",
+    "migrate:cli-chats": "node scripts/migrate-cli-history.mjs",
+    "sync:cli-brain": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-cli-brain.ps1",
+    "cleanup:junk-chats": "node scripts/cleanup-junk-chats.mjs",
     "dist:linux": "npm run build && electron-builder --linux --x64",
     "dist:mac": "npm run build && electron-builder --mac --x64 --arm64",
     "dist:all": "npm run build && electron-builder --win --linux --mac"
